@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# local env
+.env
+local.env
+
+# alembic
+alembic/versions/*.pyc
+
