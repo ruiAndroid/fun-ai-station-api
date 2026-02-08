@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, String, Text
+from sqlalchemy import JSON, BigInteger, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.base import Base, TimestampMixin
@@ -7,8 +7,11 @@ from src.models.base import Base, TimestampMixin
 class Agent(TimestampMixin, Base):
     __tablename__ = "agents"
 
-    # matches frontend static ids like "general", "dev"
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # BIGINT autoincrement primary key
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    # legacy/business identifier (previously primary key)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     handle: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)

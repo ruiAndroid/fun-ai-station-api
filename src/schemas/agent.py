@@ -4,7 +4,8 @@ from pydantic import BaseModel
 
 
 class AgentOut(BaseModel):
-    id: str
+    id: int
+    code: str
     name: str
     handle: str
     description: str

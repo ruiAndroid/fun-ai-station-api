@@ -5,14 +5,14 @@ from pydantic import BaseModel
 
 
 class ChatSessionCreate(BaseModel):
-    agent_id: str
+    agent_id: Optional[int] = None
     title: Optional[str] = None
 
 
 class ChatSessionOut(BaseModel):
     id: str
     user_id: str
-    agent_id: str
+    agent_id: int
     title: str
     created_at: datetime
     updated_at: datetime

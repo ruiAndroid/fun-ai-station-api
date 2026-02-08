@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRES_MINUTES: int = 60
 
+    # Agent service (Node + Python runtime)
+    FUN_AGENT_SERVICE_URL: str = "http://localhost:4010"
+
     @property
     def sqlalchemy_database_uri(self) -> str:
         # mysql+pymysql://user:pass@host:port/db?charset=utf8mb4

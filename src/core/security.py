@@ -6,7 +6,8 @@ from passlib.context import CryptContext
 
 from src.core.config import get_settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use bcrypt_sha256 to avoid bcrypt's 72-byte password limit while keeping bcrypt as the core KDF.
+pwd_context = CryptContext(schemes=["bcrypt_sha256"], deprecated="auto")
 settings = get_settings()
 
 
