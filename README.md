@@ -26,6 +26,12 @@ pip install -r requirements.txt
 copy local.env.example local.env
 ```
 
+也可以使用推荐路径（更适合服务器部署）：
+
+```bash
+copy local.env.example configs/fun-ai-station-api.env
+```
+
 3) Run migrations (creates tables)
 
 ```bash
@@ -35,8 +41,6 @@ alembic upgrade head
 4) Start dev server
 
 ```bash
-# Windows PowerShell (current session):
-$env:ENV_FILE="local.env"
 uvicorn src.main:app --reload --port 8001
 ```
 

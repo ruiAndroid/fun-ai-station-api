@@ -1,48 +1,95 @@
-import os
+from pathlib import Path
 from functools import lru_cache
-from typing import Optional
-
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Dict, Optional
 
 
-def _get_env_file() -> Optional[str]:
+def _repo_root() -> Path:
+    # This file is at: fun-ai-station-api/src/core/config.py
+    return Path(__file__).resolve().parents[2]
+
+
+DEFAULT_CONFIG_PATH = _repo_root() / "configs" / "fun-ai-station-api.env"
+
+
+def _parse_env_file(content: str) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for raw in (content or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key = key.strip()
+        val = val.strip()
+        if not key:
+            continue
+        if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+            val = val[1:-1]
+        out[key] = val
+    return out
+
+
+def _load_config(path: Path = DEFAULT_CONFIG_PATH) -> Dict[str, str]:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Config file not found: {path}. Please create it based on configs/fun-ai-station-api.env."
+        )
+    return _parse_env_file(path.read_text(encoding="utf-8"))
+
+
+def _get_int(cfg: Dict[str, str], key: str, default: int) -> int:
+    try:
+        return int(cfg.get(key, "").strip() or default)
+    except Exception:
+        return default
+
+
+class Settings:
     """
-    Preferred: set ENV_FILE to point to a local env file (e.g. local.env).
-    Fallback: .env if exists.
+    Read settings ONLY from `configs/fun-ai-station-api.env`.
+    Do not depend on process environment variables.
     """
-    env_file = os.getenv("ENV_FILE")
-    if env_file:
-        return env_file
-    if os.path.exists(".env"):
-        return ".env"
-    if os.path.exists("local.env"):
-        return "local.env"
-    return None
-
-
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=_get_env_file(), env_file_encoding="utf-8")
 
     # Server
-    APP_NAME: str = "fun-ai-station-api"
-    ENV: str = "local"
-    HOST: str = "0.0.0.0"
-    PORT: int = 8001
+    APP_NAME: str
+    ENV: str
+    HOST: str
+    PORT: int
 
     # Database
-    DB_HOST: str = "127.0.0.1"
-    DB_PORT: int = 3306
-    DB_NAME: str = "db_funaistation"
-    DB_USER: str = "root"
-    DB_PASSWORD: str = ""
+    DB_HOST: str
+    DB_PORT: int
+    DB_NAME: str
+    DB_USER: str
+    DB_PASSWORD: str
 
     # Auth
-    JWT_SECRET: str = "change_me"
-    JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRES_MINUTES: int = 60
+    JWT_SECRET: str
+    JWT_ALGORITHM: str
+    ACCESS_TOKEN_EXPIRES_MINUTES: int
 
     # Agent service (Node + Python runtime)
-    FUN_AGENT_SERVICE_URL: str = "http://localhost:4010"
+    FUN_AGENT_SERVICE_URL: str
+
+    def __init__(self, cfg: Optional[Dict[str, str]] = None):
+        cfg = cfg or _load_config()
+        self.APP_NAME = cfg.get("APP_NAME", "fun-ai-station-api")
+        self.ENV = cfg.get("ENV", "prod")
+        self.HOST = cfg.get("HOST", "0.0.0.0")
+        self.PORT = _get_int(cfg, "PORT", 8001)
+
+        self.DB_HOST = cfg.get("DB_HOST", "127.0.0.1")
+        self.DB_PORT = _get_int(cfg, "DB_PORT", 3306)
+        self.DB_NAME = cfg.get("DB_NAME", "db_funaistation")
+        self.DB_USER = cfg.get("DB_USER", "root")
+        self.DB_PASSWORD = cfg.get("DB_PASSWORD", "")
+
+        self.JWT_SECRET = cfg.get("JWT_SECRET", "change_me")
+        self.JWT_ALGORITHM = cfg.get("JWT_ALGORITHM", "HS256")
+        self.ACCESS_TOKEN_EXPIRES_MINUTES = _get_int(cfg, "ACCESS_TOKEN_EXPIRES_MINUTES", 60)
+
+        self.FUN_AGENT_SERVICE_URL = cfg.get("FUN_AGENT_SERVICE_URL", "http://127.0.0.1:4010")
 
     @property
     def sqlalchemy_database_uri(self) -> str:
