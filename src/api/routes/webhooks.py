@@ -306,6 +306,8 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
             "agent": agent,
             "output": output_text,
             "session_id": session.id,
+            "user_id": user.id,
+            "agent_db_id": agent_row.id,
             "agent_service": result,
         },
     )
