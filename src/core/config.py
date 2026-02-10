@@ -77,6 +77,10 @@ class Settings:
     OPENCLAW_MAX_SKEW_SECONDS: int
     OPENCLAW_DEFAULT_AGENT: str
 
+    # OpenAI-compatible API (for OpenClaw to call as "LLM backend")
+    OPENAI_API_KEY: str
+    OPENAI_DEFAULT_AGENT: str
+
     def __init__(self, cfg: Optional[Dict[str, str]] = None):
         cfg = cfg or _load_config()
         self.APP_NAME = cfg.get("APP_NAME", "fun-ai-station-api")
@@ -100,6 +104,10 @@ class Settings:
         self.OPENCLAW_WEBHOOK_SECRET = cfg.get("OPENCLAW_WEBHOOK_SECRET", "")
         self.OPENCLAW_MAX_SKEW_SECONDS = _get_int(cfg, "OPENCLAW_MAX_SKEW_SECONDS", 300)
         self.OPENCLAW_DEFAULT_AGENT = cfg.get("OPENCLAW_DEFAULT_AGENT", "attendance")
+
+        # OpenAI-compatible API
+        self.OPENAI_API_KEY = cfg.get("OPENAI_API_KEY", "")
+        self.OPENAI_DEFAULT_AGENT = cfg.get("OPENAI_DEFAULT_AGENT", self.OPENCLAW_DEFAULT_AGENT or "attendance")
 
     @property
     def sqlalchemy_database_uri(self) -> str:

@@ -2,6 +2,10 @@
 
 `fun-ai-station-api` 提供一个 webhook 用于接收 openclaw 从企业微信/其他渠道收进来的消息，并转交给 `fun-agent-service` 执行。
 
+### 架构图
+
+见：`docs/openclaw-architecture.md`
+
 ### 1) 接口地址
 
 如果你按本仓库的 Nginx 模板部署，对外地址是：
