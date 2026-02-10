@@ -16,8 +16,10 @@ from src.core.db import get_db
 from src.core.security import hash_password
 from src.models.agent import Agent
 from src.models.chat import ChatMessage, ChatSession
+from src.models.openclaw_event import OpenclawEvent
 from src.models.user import User
 from src.models.base import utcnow
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -210,6 +212,21 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
     if not agent:
         raise HTTPException(status_code=400, detail="Missing agent (set OPENCLAW_DEFAULT_AGENT or provide payload.agent)")
 
+    # ---- DB idempotency (works across restarts and multiple workers) ----
+    try:
+        db.add(OpenclawEvent(event_id=str(event_id), trace_id=trace_id))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(OpenclawEvent).filter(OpenclawEvent.event_id == str(event_id)).first()
+        return {
+            "ok": True,
+            "deduped": True,
+            "trace_id": trace_id,
+            "event_id": event_id,
+            "session_id": existing.session_id if existing else None,
+        }
+
     user_input = _extract_text(payload)
     # keep DB content reasonable
     if len(user_input) > 8000:
@@ -279,6 +296,18 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
         db.add(session)
         db.commit()
         db.refresh(session)
+
+    # update event -> session mapping (best-effort)
+    try:
+        ev = db.query(OpenclawEvent).filter(OpenclawEvent.event_id == str(event_id)).first()
+        if ev:
+            if not ev.session_id:
+                ev.session_id = session.id
+            if not ev.agent_code:
+                ev.agent_code = agent
+            db.commit()
+    except Exception:
+        db.rollback()
 
     # Insert user message
     session.updated_at = utcnow()
