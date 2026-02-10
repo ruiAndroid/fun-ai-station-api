@@ -72,6 +72,11 @@ class Settings:
     # Agent service (Node + Python runtime)
     FUN_AGENT_SERVICE_URL: str
 
+    # Openclaw webhook (receive messages from another server)
+    OPENCLAW_WEBHOOK_SECRET: str
+    OPENCLAW_MAX_SKEW_SECONDS: int
+    OPENCLAW_DEFAULT_AGENT: str
+
     def __init__(self, cfg: Optional[Dict[str, str]] = None):
         cfg = cfg or _load_config()
         self.APP_NAME = cfg.get("APP_NAME", "fun-ai-station-api")
@@ -90,6 +95,11 @@ class Settings:
         self.ACCESS_TOKEN_EXPIRES_MINUTES = _get_int(cfg, "ACCESS_TOKEN_EXPIRES_MINUTES", 60)
 
         self.FUN_AGENT_SERVICE_URL = cfg.get("FUN_AGENT_SERVICE_URL", "http://127.0.0.1:4010")
+
+        # Openclaw webhook
+        self.OPENCLAW_WEBHOOK_SECRET = cfg.get("OPENCLAW_WEBHOOK_SECRET", "")
+        self.OPENCLAW_MAX_SKEW_SECONDS = _get_int(cfg, "OPENCLAW_MAX_SKEW_SECONDS", 300)
+        self.OPENCLAW_DEFAULT_AGENT = cfg.get("OPENCLAW_DEFAULT_AGENT", "attendance")
 
     @property
     def sqlalchemy_database_uri(self) -> str:
