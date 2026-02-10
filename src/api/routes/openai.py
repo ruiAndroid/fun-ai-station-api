@@ -43,12 +43,56 @@ def _pick_last_user_text(messages: Any) -> str:
         c = m.get("content")
         if isinstance(c, str):
             return c
-        # OpenAI allows rich content blocks; degrade to json
-        try:
-            return json.dumps(c, ensure_ascii=False, separators=(",", ":"))
-        except Exception:
-            return str(c)
+        # OpenAI allows rich content blocks (array of objects). Prefer extracting text blocks.
+        if isinstance(c, list):
+            parts: List[str] = []
+            for item in c:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text" and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+            if parts:
+                return "\n".join(parts)
+            # fallback
+            try:
+                return json.dumps(c, ensure_ascii=False, separators=(",", ":"))
+            except Exception:
+                return str(c)
+        if isinstance(c, dict):
+            # some clients may send {"type":"text","text":"..."} as a dict
+            if c.get("type") == "text" and isinstance(c.get("text"), str):
+                return c["text"]
+            try:
+                return json.dumps(c, ensure_ascii=False, separators=(",", ":"))
+            except Exception:
+                return str(c)
+        return str(c)
     return ""
+
+
+def _normalize_openclaw_user_text(text: str) -> str:
+    """
+    OpenClaw sometimes injects metadata like:
+      [WeCom user:xxx] 你好
+      [message_id: ...]
+    We store only the actual user utterance where possible.
+    """
+    s = (text or "").strip()
+    if not s:
+        return s
+    lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
+    cleaned: List[str] = []
+    for ln in lines:
+        # drop pure metadata lines
+        if ln.startswith("[message_id:") and ln.endswith("]"):
+            continue
+        # strip leading user tag
+        if ln.startswith("[WeCom user:") and "]" in ln:
+            ln = ln.split("]", 1)[1].strip()
+        cleaned.append(ln)
+    # if everything got stripped, keep original
+    out = "\n".join([x for x in cleaned if x])
+    return out.strip() or s
 
 
 async def _agent_execute(*, agent: str, user_input: str, context: Dict[str, Any], trace_id: str) -> str:
@@ -167,7 +211,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     trace_id = request.headers.get("x-trace-id") or str(uuid.uuid4())
 
     messages = payload.get("messages")
-    user_input = _pick_last_user_text(messages) or ""
+    user_input = _normalize_openclaw_user_text(_pick_last_user_text(messages) or "")
     if len(user_input) > 8000:
         user_input = user_input[:7999] + "…"
 
@@ -272,9 +316,9 @@ async def completions(request: Request, db: Session = Depends(get_db)):
 
     prompt = payload.get("prompt", "")
     if isinstance(prompt, list) and prompt:
-        user_input = str(prompt[-1])
+        user_input = _normalize_openclaw_user_text(str(prompt[-1]))
     else:
-        user_input = str(prompt or "")
+        user_input = _normalize_openclaw_user_text(str(prompt or ""))
     if len(user_input) > 8000:
         user_input = user_input[:7999] + "…"
 
