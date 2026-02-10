@@ -8,10 +8,17 @@ from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from src.core.config import get_settings
+from src.core.db import get_db
+from src.core.security import hash_password
+from src.models.agent import Agent
+from src.models.chat import ChatMessage, ChatSession
+from src.models.user import User
+from src.models.base import utcnow
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -149,7 +156,7 @@ async def _call_agent_service(*, agent: str, user_input: str, context: Dict[str,
 
 
 @router.post("/openclaw")
-async def openclaw_webhook(request: Request):
+async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Receive openclaw-forwarded messages.
 
@@ -204,6 +211,10 @@ async def openclaw_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Missing agent (set OPENCLAW_DEFAULT_AGENT or provide payload.agent)")
 
     user_input = _extract_text(payload)
+    # keep DB content reasonable
+    if len(user_input) > 8000:
+        user_input = user_input[:7999] + "…"
+
     extra_context: Dict[str, Any] = {}
     if isinstance(payload, dict) and isinstance(payload.get("context"), dict):
         # user-provided context from openclaw; keep it under a dedicated key
@@ -222,8 +233,70 @@ async def openclaw_webhook(request: Request):
         },
     }
 
+    # ---- Persist chat (testing: map all OpenClaw messages to one system user) ----
+    system_email = (settings.OPENCLAW_SYSTEM_USER_EMAIL or "").strip()
+    system_password = settings.OPENCLAW_SYSTEM_USER_PASSWORD or ""
+    if not system_email:
+        raise HTTPException(status_code=500, detail="OPENCLAW_SYSTEM_USER_EMAIL not configured")
+
+    user = db.query(User).filter(User.email == system_email).first()
+    if not user:
+        user = User(email=system_email, hashed_password=hash_password(system_password))
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    agent_row = db.query(Agent).filter(Agent.code == agent).first()
+    if not agent_row:
+        # Create a minimal placeholder agent record to satisfy FK.
+        agent_row = Agent(
+            code=agent,
+            name=agent,
+            handle=f"@{agent}",
+            description=f"Auto-created for OpenClaw: {agent}",
+            tags=["openclaw"],
+            capabilities=[],
+        )
+        db.add(agent_row)
+        db.commit()
+        db.refresh(agent_row)
+
+    # Reuse a stable session per (channel, from/chat_id, agent).
+    channel = str(extra_context.get("channel") or "openclaw")
+    sender = str(extra_context.get("from") or extra_context.get("userid") or extra_context.get("sender") or "unknown")
+    chat_id = str(extra_context.get("chat_id") or extra_context.get("chatId") or "")
+    title = f"{channel}:{sender}" + (f":{chat_id}" if chat_id and chat_id != "None" else "")
+    if len(title) > 255:
+        title = title[:255]
+
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.user_id == user.id, ChatSession.agent_id == agent_row.id, ChatSession.title == title)
+        .first()
+    )
+    if not session:
+        session = ChatSession(user_id=user.id, agent_id=agent_row.id, title=title)
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+
+    # Insert user message
+    session.updated_at = utcnow()
+    db.add(ChatMessage(session_id=session.id, role="user", content=user_input))
+    db.commit()
+
+    # Execute agent
     result = await _call_agent_service(agent=agent, user_input=user_input, context=context, trace_id=trace_id)
     output = result.get("output") if isinstance(result, dict) else None
+    output_text = str(output or "")
+    if len(output_text) > 12000:
+        output_text = output_text[:11999] + "…"
+
+    # Insert assistant message
+    session.updated_at = utcnow()
+    db.add(ChatMessage(session_id=session.id, role="assistant", content=output_text))
+    db.commit()
+
     return JSONResponse(
         status_code=200,
         content={
@@ -231,7 +304,8 @@ async def openclaw_webhook(request: Request):
             "trace_id": trace_id,
             "event_id": event_id,
             "agent": agent,
-            "output": output,
+            "output": output_text,
+            "session_id": session.id,
             "agent_service": result,
         },
     )

@@ -162,3 +162,64 @@ async def chat_completions(request: Request):
 
     return StreamingResponse(_sse(), media_type="text/event-stream")
 
+
+@router.post("/completions")
+async def completions(request: Request):
+    """
+    OpenAI legacy completions compatibility.
+    Some clients/providers still call /v1/completions instead of /v1/chat/completions.
+    We map `prompt` -> agent input and return a minimal text completion response.
+    """
+    _require_bearer(request)
+    settings = get_settings()
+
+    try:
+        payload: Dict[str, Any] = await request.json()
+    except Exception:
+        payload = {}
+
+    trace_id = request.headers.get("x-trace-id") or str(uuid.uuid4())
+
+    prompt = payload.get("prompt", "")
+    if isinstance(prompt, list) and prompt:
+        user_input = str(prompt[-1])
+    else:
+        user_input = str(prompt or "")
+
+    model = payload.get("model")
+    agent = settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"
+    if isinstance(model, str) and model.strip():
+        m = model.strip()
+        if m.startswith("agent:") and m.split("agent:", 1)[1].strip():
+            agent = m.split("agent:", 1)[1].strip()
+
+    context: Dict[str, Any] = {
+        "trace_id": trace_id,
+        "source": "openai-compat",
+        "openai": {
+            "model": model,
+            "prompt": prompt if isinstance(prompt, (str, list)) else None,
+        },
+    }
+
+    output = await _agent_execute(agent=agent, user_input=user_input, context=context, trace_id=trace_id)
+
+    created = int(time.time())
+    completion_id = f"cmpl_{uuid.uuid4().hex}"
+    return JSONResponse(
+        status_code=200,
+        content={
+            "id": completion_id,
+            "object": "text_completion",
+            "created": created,
+            "model": model or "fun-agent",
+            "choices": [
+                {
+                    "index": 0,
+                    "text": output,
+                    "finish_reason": "stop",
+                }
+            ],
+        },
+    )
+

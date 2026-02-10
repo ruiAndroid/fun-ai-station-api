@@ -70,3 +70,6 @@ flowchart LR
   - POST 到 `fun-ai-station-api` 的 `/api/webhooks/openclaw`
 - **fun-ai-station-api webhook**：验签 + 幂等去重（短 TTL）+ 转发给 `fun-agent-service` 执行，返回 `output`。
 
+### 闭环（回消息）推荐做法
+
+见：`docs/openclaw-closed-loop.md`（把 OpenClaw 的 LLM backend 指向本项目的 OpenAI 兼容接口）

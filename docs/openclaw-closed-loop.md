@@ -30,15 +30,32 @@
 
 ### 2) OpenClaw：把模型 baseUrl 指向本项目
 
-在 OpenClaw 服务器的 `~/.openclaw/openclaw.json` 里，把你正在用的模型配置改成类似：
+在 OpenClaw 服务器的 `~/.openclaw/openclaw.json` 里，新增一个 provider（例如 `funai`），并把默认 agent 的模型切过去：
 
 ```json
 {
   "models": {
-    "default": {
-      "baseUrl": "http://47.118.27.59/api/openai/v1",
-      "apiKey": "填 fun-ai-station-api.env 的 OPENAI_API_KEY",
-      "model": "fun-agent"
+    "providers": {
+      "funai": {
+        "baseUrl": "http://47.118.27.59/api/openai/v1",
+        "apiKey": "填 fun-ai-station-api.env 的 OPENAI_API_KEY",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "fun-agent",
+            "name": "Fun Agent (via fun-ai-station-api)",
+            "reasoning": false,
+            "input": ["text"],
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": { "primary": "funai/fun-agent" }
     }
   }
 }
@@ -46,7 +63,8 @@
 
 说明：
 - `baseUrl` 末尾不要带 `/chat/completions`，只需要到 `/openai/v1`
-- `model` 可以随便填；若你希望显式指定 agent，可用：`agent:<agent_code>`（例如 `agent:attendance`）
+- `api`：这里保持 `openai-completions`（本项目同时兼容 `/completions` 和 `/chat/completions`）
+- 若你希望显式指定 agent，可把 OpenClaw 的模型 id 写成：`agent:<agent_code>`（例如 `agent:attendance`），本项目会识别并路由到对应 agent
 
 改完后重启 OpenClaw Gateway（你当前是 systemd user unit）：
 

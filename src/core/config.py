@@ -76,6 +76,8 @@ class Settings:
     OPENCLAW_WEBHOOK_SECRET: str
     OPENCLAW_MAX_SKEW_SECONDS: int
     OPENCLAW_DEFAULT_AGENT: str
+    OPENCLAW_SYSTEM_USER_EMAIL: str
+    OPENCLAW_SYSTEM_USER_PASSWORD: str
 
     # OpenAI-compatible API (for OpenClaw to call as "LLM backend")
     OPENAI_API_KEY: str
@@ -104,6 +106,8 @@ class Settings:
         self.OPENCLAW_WEBHOOK_SECRET = cfg.get("OPENCLAW_WEBHOOK_SECRET", "")
         self.OPENCLAW_MAX_SKEW_SECONDS = _get_int(cfg, "OPENCLAW_MAX_SKEW_SECONDS", 300)
         self.OPENCLAW_DEFAULT_AGENT = cfg.get("OPENCLAW_DEFAULT_AGENT", "attendance")
+        self.OPENCLAW_SYSTEM_USER_EMAIL = cfg.get("OPENCLAW_SYSTEM_USER_EMAIL", "openclaw@local")
+        self.OPENCLAW_SYSTEM_USER_PASSWORD = cfg.get("OPENCLAW_SYSTEM_USER_PASSWORD", "change_me")
 
         # OpenAI-compatible API
         self.OPENAI_API_KEY = cfg.get("OPENAI_API_KEY", "")
