@@ -160,7 +160,12 @@ def list_messages(
     if not session or session.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    q = select(ChatMessage).where(ChatMessage.session_id == session_id).order_by(ChatMessage.created_at.asc())
+    # Stable ordering: MySQL DATETIME may be second-precision by default; tie-break by id.
+    q = (
+        select(ChatMessage)
+        .where(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
+    )
     messages = db.execute(q).scalars().all()
     return [
         ChatMessageOut(
