@@ -1,7 +1,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_current_user
@@ -160,11 +160,15 @@ def list_messages(
     if not session or session.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Stable ordering: MySQL DATETIME may be second-precision by default; tie-break by id.
+    # Stable ordering:
+    # - MySQL DATETIME may be second-precision by default, so user+assistant can share same created_at.
+    # - UUID ids are random and do not reflect insertion order.
+    # We therefore force role ordering when timestamps tie: user first, then assistant, then id.
+    role_order = case((ChatMessage.role == "user", 0), else_=1)
     q = (
         select(ChatMessage)
         .where(ChatMessage.session_id == session_id)
-        .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
+        .order_by(ChatMessage.created_at.asc(), role_order.asc(), ChatMessage.id.asc())
     )
     messages = db.execute(q).scalars().all()
     return [
