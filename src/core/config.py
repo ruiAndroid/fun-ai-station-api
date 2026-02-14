@@ -83,6 +83,12 @@ class Settings:
     OPENAI_API_KEY: str
     OPENAI_DEFAULT_AGENT: str
 
+    # Agent routing
+    # - hybrid: mentions > LLM route > keyword route > default
+    # - llm:    mentions > LLM route > default
+    # - keywords:mentions > keyword route > default
+    ROUTER_MODE: str
+
     def __init__(self, cfg: Optional[Dict[str, str]] = None):
         cfg = cfg or _load_config()
         self.APP_NAME = cfg.get("APP_NAME", "fun-ai-station-api")
@@ -112,6 +118,9 @@ class Settings:
         # OpenAI-compatible API
         self.OPENAI_API_KEY = cfg.get("OPENAI_API_KEY", "")
         self.OPENAI_DEFAULT_AGENT = cfg.get("OPENAI_DEFAULT_AGENT", self.OPENCLAW_DEFAULT_AGENT or "attendance")
+
+        # Routing
+        self.ROUTER_MODE = (cfg.get("ROUTER_MODE", "hybrid") or "hybrid").strip().lower()
 
     @property
     def sqlalchemy_database_uri(self) -> str:

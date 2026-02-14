@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from src.core.config import get_settings
+from src.core.agent_routing import AgentLike, build_dispatch_plan_auto
 from src.core.db import get_db
 from src.core.security import hash_password
 from src.models.agent import Agent
@@ -205,12 +206,10 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
     if await _dedup_check_and_mark(str(event_id)):
         return {"ok": True, "deduped": True, "trace_id": trace_id, "event_id": event_id}
 
-    agent = None
+    forced_agent = None
     if isinstance(payload, dict):
-        agent = payload.get("agent") or payload.get("agent_code") or payload.get("agent_name")
-    agent = (agent or settings.OPENCLAW_DEFAULT_AGENT or "").strip()
-    if not agent:
-        raise HTTPException(status_code=400, detail="Missing agent (set OPENCLAW_DEFAULT_AGENT or provide payload.agent)")
+        forced_agent = payload.get("agent") or payload.get("agent_code") or payload.get("agent_name")
+    forced_agent = (forced_agent or "").strip()
 
     # ---- DB idempotency (works across restarts and multiple workers) ----
     try:
@@ -231,6 +230,38 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
     # keep DB content reasonable
     if len(user_input) > 8000:
         user_input = user_input[:7999] + "…"
+
+    # ---- Decide dispatch plan ----
+    if forced_agent:
+        plan = [
+            {"agent": forced_agent, "agent_name": forced_agent, "text": user_input}
+        ]
+    else:
+        # route among known agents from DB (prefer agent-service entries, but allow all)
+        rows = db.query(Agent).all()
+        agent_likes = [
+            AgentLike(
+                code=a.code,
+                name=a.name,
+                handle=a.handle or f"@{a.code}",
+                description=a.description or "",
+            )
+            for a in rows
+            if a.code
+        ]
+        items = await build_dispatch_plan_auto(
+            text=user_input,
+            agents=agent_likes,
+            default_agent_code=(settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+            trace_id=trace_id,
+            mode=getattr(settings, "ROUTER_MODE", "hybrid"),
+        )
+        plan = [{"agent": it.agent_code, "agent_name": it.agent_name, "text": it.text} for it in items]
+
+    if not plan:
+        raise HTTPException(status_code=400, detail="No dispatch plan")
+
+    primary_agent = plan[0]["agent"]
 
     extra_context: Dict[str, Any] = {}
     if isinstance(payload, dict) and isinstance(payload.get("context"), dict):
@@ -263,14 +294,14 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
-    agent_row = db.query(Agent).filter(Agent.code == agent).first()
+    agent_row = db.query(Agent).filter(Agent.code == primary_agent).first()
     if not agent_row:
         # Create a minimal placeholder agent record to satisfy FK.
         agent_row = Agent(
-            code=agent,
-            name=agent,
-            handle=f"@{agent}",
-            description=f"Auto-created for OpenClaw: {agent}",
+            code=primary_agent,
+            name=primary_agent,
+            handle=f"@{primary_agent}",
+            description=f"Auto-created for OpenClaw: {primary_agent}",
             tags=["openclaw"],
             capabilities=[],
         )
@@ -304,7 +335,7 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
             if not ev.session_id:
                 ev.session_id = session.id
             if not ev.agent_code:
-                ev.agent_code = agent
+                ev.agent_code = primary_agent
             db.commit()
     except Exception:
         db.rollback()
@@ -314,10 +345,41 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
     db.add(ChatMessage(session_id=session.id, role="user", content=user_input))
     db.commit()
 
-    # Execute agent
-    result = await _call_agent_service(agent=agent, user_input=user_input, context=context, trace_id=trace_id)
-    output = result.get("output") if isinstance(result, dict) else None
-    output_text = str(output or "")
+    # Execute agents sequentially
+    results: list = []
+    for i, it in enumerate(plan):
+        agent_code = str(it["agent"])
+        agent_text = str(it["text"] or user_input)
+        step_ctx = {
+            **context,
+            "dispatch": {
+                "mode": "forced" if forced_agent else ("mentions" if "@" in user_input else "auto"),
+                "index": i,
+                "total": len(plan),
+                "agent": agent_code,
+                "agent_name": it.get("agent_name") or agent_code,
+                "original_input": user_input,
+                "previous": [
+                    {"agent": r.get("agent"), "output": r.get("output", "")} for r in results
+                ],
+            },
+        }
+        r = await _call_agent_service(agent=agent_code, user_input=agent_text, context=step_ctx, trace_id=trace_id)
+        out = r.get("output") if isinstance(r, dict) else None
+        results.append(
+            {
+                "agent": agent_code,
+                "agent_name": it.get("agent_name") or agent_code,
+                "output": str(out or ""),
+                "raw": r,
+            }
+        )
+
+    if len(results) == 1:
+        output_text = results[0]["output"]
+    else:
+        output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
+
     if len(output_text) > 12000:
         output_text = output_text[:11999] + "…"
 
@@ -332,12 +394,13 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
             "ok": True,
             "trace_id": trace_id,
             "event_id": event_id,
-            "agent": agent,
+            "agent": primary_agent,
+            "agents": [r["agent"] for r in results],
             "output": output_text,
             "session_id": session.id,
             "user_id": user.id,
             "agent_db_id": agent_row.id,
-            "agent_service": result,
+            "agent_service": results,
         },
     )
 

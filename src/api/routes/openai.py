@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.core.config import get_settings
+from src.core.agent_routing import AgentLike, build_dispatch_plan_auto
 from src.core.db import get_db
 from src.core.security import hash_password
 from src.models.agent import Agent
@@ -235,8 +236,61 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
         },
     }
 
-    output = await _agent_execute(agent=agent, user_input=user_input, context=context, trace_id=trace_id)
-    output_text = str(output or "")
+    # If model explicitly forces agent, use it; otherwise auto-route by text.
+    if isinstance(model, str) and model.strip().startswith("agent:"):
+        plan = [{"agent": agent, "agent_name": agent, "text": user_input}]
+    else:
+        rows = db.query(Agent).all()
+        agent_likes = [
+            AgentLike(
+                code=a.code,
+                name=a.name,
+                handle=a.handle or f"@{a.code}",
+                description=a.description or "",
+            )
+            for a in rows
+            if a.code
+        ]
+        items = await build_dispatch_plan_auto(
+            text=user_input,
+            agents=agent_likes,
+            default_agent_code=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+            trace_id=trace_id,
+            mode=getattr(settings, "ROUTER_MODE", "hybrid"),
+        )
+        plan = [{"agent": it.agent_code, "agent_name": it.agent_name, "text": it.text} for it in items]
+        if plan:
+            agent = str(plan[0]["agent"])
+
+    results: List[Dict[str, str]] = []
+    for i, it in enumerate(plan):
+        agent_code = str(it["agent"])
+        agent_text = str(it["text"] or user_input)
+        step_ctx = {
+            **context,
+            "dispatch": {
+                "mode": "forced" if (isinstance(model, str) and model.strip().startswith("agent:")) else "auto",
+                "index": i,
+                "total": len(plan),
+                "agent": agent_code,
+                "agent_name": it.get("agent_name") or agent_code,
+                "original_input": user_input,
+                "previous": results,
+            },
+        }
+        out = await _agent_execute(agent=agent_code, user_input=agent_text, context=step_ctx, trace_id=trace_id)
+        results.append(
+            {
+                "agent": agent_code,
+                "agent_name": str(it.get("agent_name") or agent_code),
+                "output": str(out or ""),
+            }
+        )
+
+    if len(results) == 1:
+        output_text = results[0]["output"]
+    else:
+        output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
     if len(output_text) > 12000:
         output_text = output_text[:11999] + "…"
 
@@ -338,8 +392,60 @@ async def completions(request: Request, db: Session = Depends(get_db)):
         },
     }
 
-    output = await _agent_execute(agent=agent, user_input=user_input, context=context, trace_id=trace_id)
-    output_text = str(output or "")
+    if isinstance(model, str) and model.strip().startswith("agent:"):
+        plan = [{"agent": agent, "agent_name": agent, "text": user_input}]
+    else:
+        rows = db.query(Agent).all()
+        agent_likes = [
+            AgentLike(
+                code=a.code,
+                name=a.name,
+                handle=a.handle or f"@{a.code}",
+                description=a.description or "",
+            )
+            for a in rows
+            if a.code
+        ]
+        items = await build_dispatch_plan_auto(
+            text=user_input,
+            agents=agent_likes,
+            default_agent_code=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+            trace_id=trace_id,
+            mode=getattr(settings, "ROUTER_MODE", "hybrid"),
+        )
+        plan = [{"agent": it.agent_code, "agent_name": it.agent_name, "text": it.text} for it in items]
+        if plan:
+            agent = str(plan[0]["agent"])
+
+    results: List[Dict[str, str]] = []
+    for i, it in enumerate(plan):
+        agent_code = str(it["agent"])
+        agent_text = str(it["text"] or user_input)
+        step_ctx = {
+            **context,
+            "dispatch": {
+                "mode": "forced" if (isinstance(model, str) and model.strip().startswith("agent:")) else "auto",
+                "index": i,
+                "total": len(plan),
+                "agent": agent_code,
+                "agent_name": it.get("agent_name") or agent_code,
+                "original_input": user_input,
+                "previous": results,
+            },
+        }
+        out = await _agent_execute(agent=agent_code, user_input=agent_text, context=step_ctx, trace_id=trace_id)
+        results.append(
+            {
+                "agent": agent_code,
+                "agent_name": str(it.get("agent_name") or agent_code),
+                "output": str(out or ""),
+            }
+        )
+
+    if len(results) == 1:
+        output_text = results[0]["output"]
+    else:
+        output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
     if len(output_text) > 12000:
         output_text = output_text[:11999] + "…"
 
