@@ -32,9 +32,49 @@ class DispatchItem:
 
 def _keyword_rules() -> Dict[str, List[str]]:
     return {
-        "attendance": ["打卡", "签到", "签退", "下班", "请假", "加班", "考勤", "补卡"],
-        "expense": ["报销", "发票", "费用", "差旅", "打车", "出差", "报账"],
-        "admin": ["维修", "报修", "坏了", "领用", "领取", "申领", "门禁", "工位", "会议室", "快递"],
+        "attendance": [
+            "打卡",
+            "签到",
+            "签退",
+            "下班",
+            "请假",
+            "加班",
+            "考勤",
+            "补卡",
+            "迟到",
+            "早退",
+            "人事",
+            "HR",
+        ],
+        "expense": [
+            "报销",
+            "发票",
+            "费用",
+            "差旅",
+            "打车",
+            "出差",
+            "报账",
+            "财务",
+            "付款",
+            "对公",
+        ],
+        "admin": [
+            "行政",
+            "维修",
+            "报修",
+            "坏了",
+            "领用",
+            "领取",
+            "申领",
+            "门禁",
+            "工位",
+            "会议室",
+            "快递",
+            "保洁",
+            "网络",
+            "打印机",
+            "电脑",
+        ],
     }
 
 
@@ -357,29 +397,33 @@ async def _llm_route_items(
     if not obj:
         return []
 
-    # Preferred: items with per-agent task text.
+    # Preferred: items with per-agent task text. We still re-segment using local heuristics
+    # to avoid "each agent gets the whole original text" which hurts response quality.
     raw_items = obj.get("items")
     if isinstance(raw_items, list):
-        out: List[DispatchItem] = []
-        seen = set()
+        codes_in_order: List[str] = []
         for it in raw_items:
             if not isinstance(it, dict):
                 continue
             agent = it.get("agent") or it.get("code") or it.get("name")
             agent = agent.strip() if isinstance(agent, str) else ""
-            if not agent or agent not in allowed or agent in seen:
+            if not agent or agent not in allowed:
                 continue
-            txt = it.get("text") or it.get("task") or ""
-            txt = txt.strip() if isinstance(txt, str) else ""
-            if not txt:
-                txt = text
-            a = next((x for x in agents if x.code == agent), None)
-            out.append(DispatchItem(agent_code=agent, agent_name=(a.name if a else agent), text=txt))
-            seen.add(agent)
-            if len(out) >= 3:
+            if agent in codes_in_order:
+                continue
+            codes_in_order.append(agent)
+            if len(codes_in_order) >= 3:
                 break
-        if out:
-            return out
+        if codes_in_order:
+            agent_lookup = {a.code: a for a in agents if a.code}
+            clauses = _split_clauses(text)
+            # Allow local keyword hits even if the LLM missed some agents, but keep LLM order as tiebreaker.
+            return _assign_clauses_to_agents(
+                clauses=clauses,
+                agent_codes_in_order=(codes_in_order + [c for c in allowed if c not in codes_in_order]),
+                default_agent_code=default_agent_code,
+                agent_lookup=agent_lookup,
+            )
 
     # Fallback: only agents list; we'll segment with heuristics later.
     raw_agents = obj.get("agents")

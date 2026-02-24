@@ -265,7 +265,13 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     results: List[Dict[str, str]] = []
     for i, it in enumerate(plan):
         agent_code = str(it["agent"])
-        agent_text = str(it["text"] or user_input)
+        agent_text = str(it.get("text") or "")
+        if not agent_text.strip():
+            # If router failed to provide a subtask, avoid broadcasting the full input to every agent.
+            if len(plan) == 1:
+                agent_text = user_input
+            else:
+                continue
         step_ctx = {
             **context,
             "dispatch": {
@@ -420,7 +426,12 @@ async def completions(request: Request, db: Session = Depends(get_db)):
     results: List[Dict[str, str]] = []
     for i, it in enumerate(plan):
         agent_code = str(it["agent"])
-        agent_text = str(it["text"] or user_input)
+        agent_text = str(it.get("text") or "")
+        if not agent_text.strip():
+            if len(plan) == 1:
+                agent_text = user_input
+            else:
+                continue
         step_ctx = {
             **context,
             "dispatch": {

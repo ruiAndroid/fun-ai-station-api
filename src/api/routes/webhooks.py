@@ -349,7 +349,12 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
     results: list = []
     for i, it in enumerate(plan):
         agent_code = str(it["agent"])
-        agent_text = str(it["text"] or user_input)
+        agent_text = str(it.get("text") or "")
+        if not agent_text.strip():
+            if len(plan) == 1:
+                agent_text = user_input
+            else:
+                continue
         step_ctx = {
             **context,
             "dispatch": {
