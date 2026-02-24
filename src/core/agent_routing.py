@@ -157,19 +157,20 @@ def _keyword_routes(text: str) -> List[Tuple[int, str]]:
     Simple keyword-based routing. Returns (first_hit_index, agent_code).
     If no keyword hit, returns [].
     """
-    # Special-case: log file path requests should route to log agent by default.
+    hits: List[Tuple[int, str]] = []
+
+    # Special-case: log file path requests should include log agent, but NOT exclude other intents.
     m_posix_log = re.search(r"(/[^\s\"']+\.(?:log|out|err|txt))", text, flags=re.IGNORECASE)
     m_win_log = re.search(r"([A-Za-z]:\\[^\s\"']+\.(?:log|out|err|txt))", text, flags=re.IGNORECASE)
     m_logs_dir = re.search(r"(/[^\s\"']*(?:/logs?/)[^\s\"']+)", text, flags=re.IGNORECASE)
     if m_posix_log:
-        return [(m_posix_log.start(1), "log")]
-    if m_win_log:
-        return [(m_win_log.start(1), "log")]
-    if m_logs_dir and ("log" in (text or "").lower() or "日志" in (text or "")):
-        return [(m_logs_dir.start(1), "log")]
+        hits.append((m_posix_log.start(1), "log"))
+    elif m_win_log:
+        hits.append((m_win_log.start(1), "log"))
+    elif m_logs_dir and ("log" in (text or "").lower() or "日志" in (text or "")):
+        hits.append((m_logs_dir.start(1), "log"))
 
     rules = _keyword_rules()
-    hits: List[Tuple[int, str]] = []
     for code, kws in rules.items():
         best: Optional[int] = None
         for kw in kws:
@@ -263,6 +264,11 @@ def _maybe_route_log_first(text: str, agents: Sequence[AgentLike]) -> Optional[D
 
     s = text.strip()
     if not s:
+        return None
+
+    # Only shortcut if the user message is primarily a single log request.
+    clauses = _split_clauses(s)
+    if len(clauses) > 1:
         return None
 
     # Path-based hint
