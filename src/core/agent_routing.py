@@ -75,6 +75,18 @@ def _keyword_rules() -> Dict[str, List[str]]:
             "打印机",
             "电脑",
         ],
+        "log": [
+            "log",
+            "日志",
+            "查看日志",
+            "查日志",
+            "tail",
+            "grep",
+            "out.log",
+            "err.log",
+            "/var/log",
+            "/logs/",
+        ],
     }
 
 
@@ -145,6 +157,17 @@ def _keyword_routes(text: str) -> List[Tuple[int, str]]:
     Simple keyword-based routing. Returns (first_hit_index, agent_code).
     If no keyword hit, returns [].
     """
+    # Special-case: log file path requests should route to log agent by default.
+    m_posix_log = re.search(r"(/[^\s\"']+\.(?:log|out|err|txt))", text, flags=re.IGNORECASE)
+    m_win_log = re.search(r"([A-Za-z]:\\[^\s\"']+\.(?:log|out|err|txt))", text, flags=re.IGNORECASE)
+    m_logs_dir = re.search(r"(/[^\s\"']*(?:/logs?/)[^\s\"']+)", text, flags=re.IGNORECASE)
+    if m_posix_log:
+        return [(m_posix_log.start(1), "log")]
+    if m_win_log:
+        return [(m_win_log.start(1), "log")]
+    if m_logs_dir and ("log" in (text or "").lower() or "日志" in (text or "")):
+        return [(m_logs_dir.start(1), "log")]
+
     rules = _keyword_rules()
     hits: List[Tuple[int, str]] = []
     for code, kws in rules.items():
@@ -217,7 +240,46 @@ def _score_clause_for_agent(clause: str, agent_code: str) -> int:
         score += 1
     if agent_code == "admin" and ("联系" in clause or "坏" in clause or "修" in clause):
         score += 1
+    if agent_code == "log":
+        if re.search(r"(/[^\s\"']+\.(?:log|out|err|txt))", clause, flags=re.IGNORECASE):
+            score += 8
+        elif re.search(r"([A-Za-z]:\\[^\s\"']+\.(?:log|out|err|txt))", clause, flags=re.IGNORECASE):
+            score += 8
+        elif "/logs/" in clause or "/log/" in clause or "日志" in clause:
+            score += 4
     return score
+
+
+def _maybe_route_log_first(text: str, agents: Sequence[AgentLike]) -> Optional[DispatchItem]:
+    """
+    If the user message looks like "view this log file", route directly to log agent.
+    This avoids defaulting to attendance/other when the user didn't explicitly @log助手.
+    """
+    if not text:
+        return None
+    has_log_agent = any(a.code == "log" for a in agents)
+    if not has_log_agent:
+        return None
+
+    s = text.strip()
+    if not s:
+        return None
+
+    # Path-based hint
+    if re.search(r"(/[^\s\"']+\.(?:log|out|err|txt))", s, flags=re.IGNORECASE) or re.search(
+        r"([A-Za-z]:\\[^\s\"']+\.(?:log|out|err|txt))", s, flags=re.IGNORECASE
+    ):
+        a = next((x for x in agents if x.code == "log"), None)
+        return DispatchItem(agent_code="log", agent_name=(a.name if a else "log"), text=s)
+
+    # Keyword-based hint
+    low = s.lower()
+    if "日志" in s or "log" in low or "tail" in low or "grep" in low:
+        if re.search(r"(/[^\s\"']+)", s) or re.search(r"([A-Za-z]:\\[^\s\"']+)", s):
+            a = next((x for x in agents if x.code == "log"), None)
+            return DispatchItem(agent_code="log", agent_name=(a.name if a else "log"), text=s)
+
+    return None
 
 
 def _assign_clauses_to_agents(
@@ -486,6 +548,11 @@ async def build_dispatch_plan_llm(
             )
         return items
 
+    # 1.5) log helper shortcut
+    log_item = _maybe_route_log_first(text, agents)
+    if log_item:
+        return [log_item]
+
     # 2) LLM routing
     try:
         items = await _llm_route_items(
@@ -557,6 +624,10 @@ async def build_dispatch_plan_auto(
                     )
                 )
             return items
+
+        log_item = _maybe_route_log_first(text, agents)
+        if log_item:
+            return [log_item]
         try:
             items = await _llm_route_items(
                 text=text, agents=agents, default_agent_code=default_agent_code, trace_id=trace_id
@@ -588,6 +659,10 @@ async def build_dispatch_plan_auto(
                     )
                 )
             return items2
+
+        log_item = _maybe_route_log_first(text, agents)
+        if log_item:
+            return [log_item]
         kw = _keyword_routes(text)
         if kw:
             codes2: List[str] = []
@@ -647,6 +722,11 @@ def build_dispatch_plan(
                 )
             )
         return items
+
+    # 1.5) log helper shortcut
+    log_item = _maybe_route_log_first(text, agents)
+    if log_item:
+        return [log_item]
 
     # 2) keyword routing
     kw = _keyword_routes(text)

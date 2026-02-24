@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from src.core.config import get_settings
 from src.core.agent_routing import AgentLike, build_dispatch_plan_auto
+from src.core.agent_service_client import list_agent_service_agents
 from src.core.db import get_db
 from src.core.security import hash_password
 from src.models.agent import Agent
@@ -237,7 +238,9 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
             {"agent": forced_agent, "agent_name": forced_agent, "text": user_input}
         ]
     else:
-        # route among known agents from DB (prefer agent-service entries, but allow all)
+        # Route among known agents.
+        # - Prefer DB agents (for display/metadata)
+        # - Also merge live fun-agent-service agents so new agents work even if DB hasn't been synced yet.
         rows = db.query(Agent).all()
         agent_likes = [
             AgentLike(
@@ -249,6 +252,19 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
             for a in rows
             if a.code
         ]
+        existing_codes = {a.code for a in agent_likes if a.code}
+        service_agents = await list_agent_service_agents(trace_id=trace_id)
+        for item in service_agents:
+            if not isinstance(item, dict):
+                continue
+            code = str(item.get("code") or item.get("name") or "").strip()
+            if not code or code in existing_codes:
+                continue
+            name = str(item.get("display_name") or item.get("name") or code)
+            handle = str(item.get("handle") or f"@{code}")
+            desc = str(item.get("description") or "")
+            agent_likes.append(AgentLike(code=code, name=name, handle=handle, description=desc))
+            existing_codes.add(code)
         items = await build_dispatch_plan_auto(
             text=user_input,
             agents=agent_likes,
