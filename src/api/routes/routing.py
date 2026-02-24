@@ -16,7 +16,7 @@ router = APIRouter(prefix="/routing", tags=["routing"])
 @router.post("/plan")
 async def route_plan(request: Request, db: Session = Depends(get_db)):
     """
-    Return an ordered list of agent codes for a user input.
+    Return an ordered dispatch plan for a user input.
 
     - Uses the same routing logic as enterprise WeCom (OpenClaw) entrypoints.
     - Controlled by settings.ROUTER_MODE (hybrid/llm/keywords).
@@ -58,7 +58,10 @@ async def route_plan(request: Request, db: Session = Depends(get_db)):
         content={
             "ok": True,
             "mode": getattr(settings, "ROUTER_MODE", "hybrid"),
+            # Backward compatible: "agents" list remains.
             "agents": [it.agent_code for it in items],
+            # New: per-agent subtask text.
+            "items": [{"agent": it.agent_code, "text": it.text} for it in items],
         },
     )
 

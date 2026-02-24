@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import httpx
 
@@ -28,6 +28,14 @@ class DispatchItem:
     agent_code: str
     agent_name: str
     text: str
+
+
+def _keyword_rules() -> Dict[str, List[str]]:
+    return {
+        "attendance": ["打卡", "签到", "签退", "下班", "请假", "加班", "考勤", "补卡"],
+        "expense": ["报销", "发票", "费用", "差旅", "打车", "出差", "报账"],
+        "admin": ["维修", "报修", "坏了", "领用", "领取", "申领", "门禁", "工位", "会议室", "快递"],
+    }
 
 
 def _agent_aliases(a: AgentLike) -> List[str]:
@@ -97,11 +105,7 @@ def _keyword_routes(text: str) -> List[Tuple[int, str]]:
     Simple keyword-based routing. Returns (first_hit_index, agent_code).
     If no keyword hit, returns [].
     """
-    rules = {
-        "attendance": ["打卡", "签到", "签退", "下班", "请假", "加班", "考勤", "补卡"],
-        "expense": ["报销", "发票", "费用", "差旅", "打车", "出差", "报账"],
-        "admin": ["维修", "报修", "坏了", "领用", "领取", "申领", "门禁", "工位", "会议室", "快递"],
-    }
+    rules = _keyword_rules()
     hits: List[Tuple[int, str]] = []
     for code, kws in rules.items():
         best: Optional[int] = None
@@ -113,6 +117,128 @@ def _keyword_routes(text: str) -> List[Tuple[int, str]]:
             hits.append((best, code))
     hits.sort(key=lambda x: x[0])
     return hits
+
+
+def _split_clauses(text: str) -> List[str]:
+    """
+    Split a user utterance into rough clauses for multi-intent dispatch.
+
+    Heuristics:
+    - Prefer natural separators: 。！？；\n
+    - Then split by commas and common conjunctions (然后/另外/同时/以及/并且/顺便/再/还要)
+    """
+    s = (text or "").strip()
+    if not s:
+        return []
+
+    # Normalize whitespace
+    s = " ".join(s.split())
+
+    # Stage 1: strong punctuation
+    parts: List[str] = []
+    for p in re.split(r"[。！？!?\n；;]+", s):
+        p = p.strip(" ,，。；;")
+        if p:
+            parts.append(p)
+
+    # Stage 2: weaker separators + conjunctions
+    clauses: List[str] = []
+    for p in parts:
+        # Keep the conjunction token as a splitter only; don't remove semantic words inside phrases like “再次”.
+        sub = re.split(r"(?:，|,|、|\s+(?:然后|另外|同时|以及|并且|顺便|再|还要)\s+)", p)
+        for x in sub:
+            x = x.strip(" ,，。；;")
+            if x:
+                clauses.append(x)
+
+    # De-dup empty/super short noise but keep intent-bearing short clauses.
+    out: List[str] = []
+    for c in clauses:
+        if not c:
+            continue
+        out.append(c)
+
+    return out or [s]
+
+
+def _score_clause_for_agent(clause: str, agent_code: str) -> int:
+    rules = _keyword_rules()
+    kws = rules.get(agent_code) or []
+    if not kws:
+        return 0
+    score = 0
+    for kw in kws:
+        if kw and kw in clause:
+            score += 3
+    # mild boosts for common patterns
+    if agent_code == "attendance" and ("迟到" in clause or "早退" in clause):
+        score += 2
+    if agent_code == "expense" and ("金额" in clause or "票" in clause):
+        score += 1
+    if agent_code == "admin" and ("联系" in clause or "坏" in clause or "修" in clause):
+        score += 1
+    return score
+
+
+def _assign_clauses_to_agents(
+    *,
+    clauses: List[str],
+    agent_codes_in_order: List[str],
+    default_agent_code: str,
+    agent_lookup: Dict[str, AgentLike],
+) -> List[DispatchItem]:
+    """
+    Map each clause to one agent and merge per-agent clauses while preserving order of first appearance.
+    """
+    if not clauses:
+        return []
+
+    picked_order: List[str] = []
+    buckets: Dict[str, List[str]] = {}
+
+    allowed_set = set(agent_codes_in_order)
+    if default_agent_code and default_agent_code not in allowed_set and default_agent_code in agent_lookup:
+        agent_codes_in_order = agent_codes_in_order + [default_agent_code]
+        allowed_set.add(default_agent_code)
+
+    for clause in clauses:
+        best_code: Optional[str] = None
+        best_score = -1
+        for code in agent_codes_in_order:
+            score = _score_clause_for_agent(clause, code)
+            if score > best_score:
+                best_score = score
+                best_code = code
+            elif score == best_score and best_code is not None:
+                # keep earlier agent in agent_codes_in_order
+                continue
+
+        if not best_code or best_score <= 0:
+            best_code = default_agent_code or (agent_codes_in_order[0] if agent_codes_in_order else "")
+
+        if not best_code:
+            continue
+        if best_code not in buckets:
+            buckets[best_code] = []
+        buckets[best_code].append(clause)
+        if best_code not in picked_order:
+            picked_order.append(best_code)
+
+    items: List[DispatchItem] = []
+    for code in picked_order:
+        a = agent_lookup.get(code)
+        text = "；".join([x.strip() for x in buckets.get(code, []) if x.strip()]).strip()
+        if not text:
+            continue
+        items.append(
+            DispatchItem(
+                agent_code=code,
+                agent_name=(a.name if a else code),
+                text=text,
+            )
+        )
+
+    return items
 
 
 def _extract_json_obj(s: str) -> Optional[dict]:
@@ -135,15 +261,15 @@ def _extract_json_obj(s: str) -> Optional[dict]:
         return None
 
 
-async def _llm_route_agents(
+async def _llm_route_items(
     *,
     text: str,
     agents: Sequence[AgentLike],
     default_agent_code: str,
     trace_id: str,
-) -> List[str]:
+) -> List[DispatchItem]:
     """
-    Ask an external LLM to choose an ordered list of agent codes to handle the message.
+    Ask an external LLM to choose an ordered list of agent codes AND provide per-agent subtask text.
     Uses the same LLM config as fun-agent-service via GET {FUN_AGENT_SERVICE_URL}/config/llm.
     """
     settings = get_settings()
@@ -182,13 +308,16 @@ async def _llm_route_agents(
         agent_lines.append(f"- code={a.code} name={a.name} handle={a.handle} desc={desc}")
 
     system = (
-        "你是一个路由器，负责根据用户输入选择应该调用哪些智能体，以及调用顺序。\n"
+        "你是一个路由器，负责根据用户输入把任务拆分，并分配给合适的智能体，给出执行顺序。\n"
         "你只能从下面提供的智能体 code 中选择，输出严格 JSON。\n"
-        '输出格式：{"agents":["code1","code2"],"reason":"..."}\n'
+        '输出格式（推荐）：{"items":[{"agent":"code1","text":"子任务1"},{"agent":"code2","text":"子任务2"}],"reason":"..."}\n'
+        '兼容格式：{"agents":["code1","code2"],"reason":"..."}（如果无法拆分子任务）\n'
         "规则：\n"
         "- 如果用户明确 @了某个智能体，则无需路由（上游会处理）。\n"
-        "- 如果用户包含多个意图，可以返回多个 agents，顺序代表处理顺序。\n"
-        f"- 如果不确定，返回默认：{default_agent_code}\n"
+        "- 如果用户包含多个意图，必须尽量返回多个 items，并且每个 item.text 只包含该智能体需要处理的那一段，不要把整段原文复制给每个智能体。\n"
+        "- item.text 尽量保持用户原话的关键信息，并补足该智能体所需的上下文（如：时间/金额/地点/联系人等），但不要替其他智能体做事。\n"
+        "- items 最多 3 个。\n"
+        f"- 如果不确定，返回默认：{default_agent_code}。\n"
         "可选智能体如下：\n"
         + "\n".join(agent_lines)
     )
@@ -227,26 +356,58 @@ async def _llm_route_agents(
     obj = _extract_json_obj(content)
     if not obj:
         return []
-    raw_agents = obj.get("agents")
-    if not isinstance(raw_agents, list):
-        return []
 
+    # Preferred: items with per-agent task text.
+    raw_items = obj.get("items")
+    if isinstance(raw_items, list):
+        out: List[DispatchItem] = []
+        seen = set()
+        for it in raw_items:
+            if not isinstance(it, dict):
+                continue
+            agent = it.get("agent") or it.get("code") or it.get("name")
+            agent = agent.strip() if isinstance(agent, str) else ""
+            if not agent or agent not in allowed or agent in seen:
+                continue
+            txt = it.get("text") or it.get("task") or ""
+            txt = txt.strip() if isinstance(txt, str) else ""
+            if not txt:
+                txt = text
+            a = next((x for x in agents if x.code == agent), None)
+            out.append(DispatchItem(agent_code=agent, agent_name=(a.name if a else agent), text=txt))
+            seen.add(agent)
+            if len(out) >= 3:
+                break
+        if out:
+            return out
+
+    # Fallback: only agents list; we'll segment with heuristics later.
+    raw_agents = obj.get("agents")
     picked: List[str] = []
-    for x in raw_agents:
-        if not isinstance(x, str):
-            continue
-        code = x.strip()
-        if not code or code not in allowed:
-            continue
-        if code in picked:
-            continue
-        picked.append(code)
-        if len(picked) >= 3:
-            break
+    if isinstance(raw_agents, list):
+        for x in raw_agents:
+            if not isinstance(x, str):
+                continue
+            code = x.strip()
+            if not code or code not in allowed:
+                continue
+            if code in picked:
+                continue
+            picked.append(code)
+            if len(picked) >= 3:
+                break
 
     if not picked and default_agent_code in allowed:
         picked = [default_agent_code]
-    return picked
+
+    agent_lookup = {a.code: a for a in agents if a.code}
+    clauses = _split_clauses(text)
+    return _assign_clauses_to_agents(
+        clauses=clauses,
+        agent_codes_in_order=picked,
+        default_agent_code=default_agent_code,
+        agent_lookup=agent_lookup,
+    )
 
 
 async def build_dispatch_plan_llm(
@@ -283,17 +444,13 @@ async def build_dispatch_plan_llm(
 
     # 2) LLM routing
     try:
-        codes = await _llm_route_agents(
+        items = await _llm_route_items(
             text=text, agents=agents, default_agent_code=default_agent_code, trace_id=trace_id
         )
     except Exception:
-        codes = []
-    if codes:
-        out: List[DispatchItem] = []
-        for code in codes:
-            a = next((x for x in agents if x.code == code), None)
-            out.append(DispatchItem(agent_code=code, agent_name=(a.name if a else code), text=text))
-        return out
+        items = []
+    if items:
+        return items
 
     # 3) keyword routing fallback
     kw = _keyword_routes(text)
@@ -302,11 +459,16 @@ async def build_dispatch_plan_llm(
         for _idx, code in kw:
             if code not in codes2:
                 codes2.append(code)
-        out2: List[DispatchItem] = []
-        for code in codes2:
-            a = next((x for x in agents if x.code == code), None)
-            out2.append(DispatchItem(agent_code=code, agent_name=(a.name if a else code), text=text))
-        return out2
+        agent_lookup = {a.code: a for a in agents if a.code}
+        clauses = _split_clauses(text)
+        items2 = _assign_clauses_to_agents(
+            clauses=clauses,
+            agent_codes_in_order=codes2,
+            default_agent_code=default_agent_code,
+            agent_lookup=agent_lookup,
+        )
+        if items2:
+            return items2
 
     # 4) default fallback
     a = next((x for x in agents if x.code == default_agent_code), None)
@@ -352,17 +514,13 @@ async def build_dispatch_plan_auto(
                 )
             return items
         try:
-            codes = await _llm_route_agents(
+            items = await _llm_route_items(
                 text=text, agents=agents, default_agent_code=default_agent_code, trace_id=trace_id
             )
         except Exception:
-            codes = []
-        if codes:
-            out: List[DispatchItem] = []
-            for code in codes:
-                a = next((x for x in agents if x.code == code), None)
-                out.append(DispatchItem(agent_code=code, agent_name=(a.name if a else code), text=text))
-            return out
+            items = []
+        if items:
+            return items
         a = next((x for x in agents if x.code == default_agent_code), None)
         return [DispatchItem(agent_code=default_agent_code, agent_name=(a.name if a else default_agent_code), text=text)]
 
@@ -392,11 +550,16 @@ async def build_dispatch_plan_auto(
             for _idx, code in kw:
                 if code not in codes2:
                     codes2.append(code)
-            out2: List[DispatchItem] = []
-            for code in codes2:
-                a = next((x for x in agents if x.code == code), None)
-                out2.append(DispatchItem(agent_code=code, agent_name=(a.name if a else code), text=text))
-            return out2
+            agent_lookup = {a.code: a for a in agents if a.code}
+            clauses = _split_clauses(text)
+            out2 = _assign_clauses_to_agents(
+                clauses=clauses,
+                agent_codes_in_order=codes2,
+                default_agent_code=default_agent_code,
+                agent_lookup=agent_lookup,
+            )
+            if out2:
+                return out2
         a = next((x for x in agents if x.code == default_agent_code), None)
         return [DispatchItem(agent_code=default_agent_code, agent_name=(a.name if a else default_agent_code), text=text)]
 
@@ -448,11 +611,16 @@ def build_dispatch_plan(
         for _idx, code in kw:
             if code not in codes:
                 codes.append(code)
-        out: List[DispatchItem] = []
-        for code in codes:
-            a = next((x for x in agents if x.code == code), None)
-            out.append(DispatchItem(agent_code=code, agent_name=(a.name if a else code), text=text))
-        return out
+        agent_lookup = {a.code: a for a in agents if a.code}
+        clauses = _split_clauses(text)
+        out = _assign_clauses_to_agents(
+            clauses=clauses,
+            agent_codes_in_order=codes,
+            default_agent_code=default_agent_code,
+            agent_lookup=agent_lookup,
+        )
+        if out:
+            return out
 
     # 3) fallback
     a = next((x for x in agents if x.code == default_agent_code), None)
