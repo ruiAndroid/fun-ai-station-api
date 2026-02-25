@@ -57,6 +57,7 @@ async def route_plan(request: Request, db: Session = Depends(get_db)):
                         "agent_name": str(it.get("agent_name") or ""),
                         "text": str(it.get("text") or ""),
                         "reason": str(it.get("reason") or ""),
+                        "depends_on": it.get("depends_on") if isinstance(it.get("depends_on"), list) else [],
                     }
                     for it in items0
                     if isinstance(it, dict) and str(it.get("agent") or "").strip()
@@ -93,7 +94,15 @@ async def route_plan(request: Request, db: Session = Depends(get_db)):
             # Backward compatible: "agents" list remains.
             "agents": [it.agent_code for it in items],
             # New: per-agent subtask text.
-            "items": [{"agent": it.agent_code, "text": it.text, "reason": ""} for it in items],
+            "items": [
+                {
+                    "agent": it.agent_code,
+                    "text": it.text,
+                    "reason": "",
+                    "depends_on": it.depends_on,
+                }
+                for it in items
+            ],
         },
     )
 

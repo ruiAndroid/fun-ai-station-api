@@ -115,29 +115,30 @@ sequenceDiagram
   "mode": "hybrid",
   "default_agent": "attendance",
   "items": [
-    { "agent": "attendance", "agent_name": "考勤助手", "text": "..." },
-    { "agent": "expense", "agent_name": "财务报销", "text": "..." }
+    { "agent": "attendance", "agent_name": "考勤助手", "text": "...", "depends_on": [] },
+    { "agent": "expense", "agent_name": "财务报销", "text": "...", "depends_on": ["attendance"] }
   ]
 }
 ```
 
 说明：
 - `items[*].text` 是 **分配给该 agent 的子任务文本**（不应重复整段原文）。
+- `items[*].depends_on` 表示该 agent 需要引用的前置 agent（只允许引用更早的步骤）。
 
 ### 4.2 执行计划：`POST /dispatch/execute`
 
 请求（推荐把 `items` 一并传入，保证“计划与执行一致”）：
 ```json
-{
-  "text": "用户输入",
-  "items": [
-    { "agent": "attendance", "text": "..." },
-    { "agent": "expense", "text": "..." }
-  ],
-  "mode": "hybrid",
-  "default_agent": "attendance",
-  "context": { "trace_id": "..." }
-}
+  {
+    "text": "用户输入",
+    "items": [
+      { "agent": "attendance", "text": "...", "depends_on": [] },
+      { "agent": "expense", "text": "...", "depends_on": ["attendance"] }
+    ],
+    "mode": "hybrid",
+    "default_agent": "attendance",
+    "context": { "trace_id": "..." }
+  }
 ```
 
 响应：
@@ -174,9 +175,22 @@ sequenceDiagram
 - `index` / `total`：当前步骤序号与总数
 - `agent` / `agent_name`
 - `original_input`：原始用户输入（仅用于参考，不建议 agent 基于它扩展到别的任务）
-- `previous`：前面步骤的输出列表（用于协作：后续 agent 可以引用前面结果）
+- `depends_on`：当前 agent 依赖的前置 agent 列表
+- `dependencies`：根据 depends_on 筛选后的前置输出（用于协作：后续 agent 直接引用）
+- `previous`：前面步骤的输出列表（兼容字段）
 
 这是一种 **轻量协同**：不做复杂的多轮 Planner/Reviewer，而是先把“每个 agent 只做自己那一段”做好。
+
+---
+
+## 6.1 第二回合：汇总助手（synthesizer）
+当计划包含多个 agent 时，执行完第一回合后，会触发一次“汇总助手”生成最终回复：
+
+- agent code：`synthesizer`（display：汇总助手）
+- 输入：由系统拼装的“用户原始问题 + 各智能体输出”
+- 输出：最终给用户的统一答复（不逐条复述）
+
+如需关闭，可将 `DISABLED_AGENTS` 中加入 `synthesizer`，或直接禁用该 agent。
 
 ---
 
@@ -210,4 +224,3 @@ sequenceDiagram
 2) 配置 `ORCHESTRATOR_URL=http://<new-orchestrator>`
 
 即可在不改动入口业务逻辑的前提下完成迁移。
-

@@ -98,6 +98,35 @@ def _normalize_openclaw_user_text(text: str) -> str:
     return out.strip() or s
 
 
+def _select_dependencies(results: List[Dict[str, str]], depends_on: Any) -> List[Dict[str, str]]:
+    if not isinstance(depends_on, list) or not depends_on:
+        return list(results)
+    dep_set = {str(d).strip() for d in depends_on if isinstance(d, str) and d.strip()}
+    if not dep_set:
+        return list(results)
+    return [r for r in results if str(r.get("agent") or "").strip() in dep_set]
+
+
+def _build_synthesis_input(user_input: str, results: List[Dict[str, str]]) -> str:
+    lines: List[str] = []
+    for r in results:
+        name = str(r.get("agent_name") or r.get("agent") or "").strip()
+        out = str(r.get("output") or "").strip()
+        if not name or not out:
+            continue
+        if len(out) > 2000:
+            out = out[:1999] + "…"
+        lines.append(f"- {name}: {out}")
+    joined = "\n".join(lines) if lines else "(无有效输出)"
+    return (
+        "你是多智能体协作的汇总助手。请基于用户原始问题与各智能体输出，给出最终答复。\n"
+        "要求：1) 只输出最终结论/行动项，不逐条复述每个智能体；2) 如有冲突，指出并给出最合理方案；"
+        "3) 保持与用户一致的语言与语气。\n\n"
+        f"【用户原始问题】\n{user_input}\n\n"
+        f"【各智能体输出】\n{joined}"
+    )
+
+
 async def _agent_execute(*, agent: str, user_input: str, context: Dict[str, Any], trace_id: str) -> str:
     settings = get_settings()
     base = settings.FUN_AGENT_SERVICE_URL.rstrip("/")
@@ -240,7 +269,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
 
     # If model explicitly forces agent, use it; otherwise auto-route by text.
     if isinstance(model, str) and model.strip().startswith("agent:"):
-        plan = [{"agent": agent, "agent_name": agent, "text": user_input}]
+        plan = [{"agent": agent, "agent_name": agent, "text": user_input, "depends_on": []}]
     else:
         plan = []
         # Prefer orchestrator service (lives in fun-agent-service for now).
@@ -262,6 +291,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
                         "agent": a0,
                         "agent_name": str(it.get("agent_name") or a0),
                         "text": str(it.get("text") or ""),
+                        "depends_on": it.get("depends_on") if isinstance(it.get("depends_on"), list) else [],
                     }
                 )
 
@@ -300,7 +330,15 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
                 trace_id=trace_id,
                 mode=getattr(settings, "ROUTER_MODE", "hybrid"),
             )
-            plan = [{"agent": it.agent_code, "agent_name": it.agent_name, "text": it.text} for it in items]
+            plan = [
+                {
+                    "agent": it.agent_code,
+                    "agent_name": it.agent_name,
+                    "text": it.text,
+                    "depends_on": it.depends_on,
+                }
+                for it in items
+            ]
             if plan:
                 agent = str(plan[0]["agent"])
 
@@ -340,6 +378,8 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
                     agent_text = user_input
                 else:
                     continue
+            depends_on = it.get("depends_on")
+            dependencies = _select_dependencies(results, depends_on)
             step_ctx = {
                 **context,
                 "dispatch": {
@@ -349,6 +389,8 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
                     "agent": agent_code,
                     "agent_name": it.get("agent_name") or agent_code,
                     "original_input": user_input,
+                    "depends_on": depends_on if isinstance(depends_on, list) else [],
+                    "dependencies": dependencies,
                     "previous": results,
                 },
             }
@@ -361,10 +403,36 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
                 }
             )
 
-        if len(results) == 1:
-            output_text = results[0]["output"]
-        else:
-            output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
+      if len(results) == 1:
+          output_text = results[0]["output"]
+      else:
+          output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
+          try:
+              synth_input = _build_synthesis_input(user_input, results)
+              synth_ctx = {
+                  **context,
+                  "dispatch": {
+                      "mode": "synthesizer",
+                      "index": len(results),
+                      "total": len(results) + 1,
+                      "agent": "synthesizer",
+                      "agent_name": "汇总助手",
+                      "original_input": user_input,
+                      "depends_on": [r["agent"] for r in results if r.get("agent")],
+                      "dependencies": results,
+                      "previous": results,
+                  },
+              }
+              synth_out = await _agent_execute(
+                  agent="synthesizer",
+                  user_input=synth_input,
+                  context=synth_ctx,
+                  trace_id=trace_id,
+              )
+              if isinstance(synth_out, str) and synth_out.strip():
+                  output_text = synth_out.strip()
+          except Exception:
+              pass
     if len(output_text) > 12000:
         output_text = output_text[:11999] + "…"
 
@@ -467,7 +535,7 @@ async def completions(request: Request, db: Session = Depends(get_db)):
     }
 
     if isinstance(model, str) and model.strip().startswith("agent:"):
-        plan = [{"agent": agent, "agent_name": agent, "text": user_input}]
+        plan = [{"agent": agent, "agent_name": agent, "text": user_input, "depends_on": []}]
     else:
         plan = []
         # Prefer orchestrator service (lives in fun-agent-service for now).
@@ -489,6 +557,7 @@ async def completions(request: Request, db: Session = Depends(get_db)):
                         "agent": a0,
                         "agent_name": str(it.get("agent_name") or a0),
                         "text": str(it.get("text") or ""),
+                        "depends_on": it.get("depends_on") if isinstance(it.get("depends_on"), list) else [],
                     }
                 )
 
@@ -527,7 +596,15 @@ async def completions(request: Request, db: Session = Depends(get_db)):
                 trace_id=trace_id,
                 mode=getattr(settings, "ROUTER_MODE", "hybrid"),
             )
-            plan = [{"agent": it.agent_code, "agent_name": it.agent_name, "text": it.text} for it in items]
+            plan = [
+                {
+                    "agent": it.agent_code,
+                    "agent_name": it.agent_name,
+                    "text": it.text,
+                    "depends_on": it.depends_on,
+                }
+                for it in items
+            ]
             if plan:
                 agent = str(plan[0]["agent"])
 
@@ -565,6 +642,8 @@ async def completions(request: Request, db: Session = Depends(get_db)):
                     agent_text = user_input
                 else:
                     continue
+            depends_on = it.get("depends_on")
+            dependencies = _select_dependencies(results, depends_on)
             step_ctx = {
                 **context,
                 "dispatch": {
@@ -574,6 +653,8 @@ async def completions(request: Request, db: Session = Depends(get_db)):
                     "agent": agent_code,
                     "agent_name": it.get("agent_name") or agent_code,
                     "original_input": user_input,
+                    "depends_on": depends_on if isinstance(depends_on, list) else [],
+                    "dependencies": dependencies,
                     "previous": results,
                 },
             }
@@ -586,10 +667,36 @@ async def completions(request: Request, db: Session = Depends(get_db)):
                 }
             )
 
-        if len(results) == 1:
-            output_text = results[0]["output"]
-        else:
-            output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
+      if len(results) == 1:
+          output_text = results[0]["output"]
+      else:
+          output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
+          try:
+              synth_input = _build_synthesis_input(user_input, results)
+              synth_ctx = {
+                  **context,
+                  "dispatch": {
+                      "mode": "synthesizer",
+                      "index": len(results),
+                      "total": len(results) + 1,
+                      "agent": "synthesizer",
+                      "agent_name": "汇总助手",
+                      "original_input": user_input,
+                      "depends_on": [r["agent"] for r in results if r.get("agent")],
+                      "dependencies": results,
+                      "previous": results,
+                  },
+              }
+              synth_out = await _agent_execute(
+                  agent="synthesizer",
+                  user_input=synth_input,
+                  context=synth_ctx,
+                  trace_id=trace_id,
+              )
+              if isinstance(synth_out, str) and synth_out.strip():
+                  output_text = synth_out.strip()
+          except Exception:
+              pass
     if len(output_text) > 12000:
         output_text = output_text[:11999] + "…"
 

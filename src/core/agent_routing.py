@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import httpx
@@ -28,6 +28,41 @@ class DispatchItem:
     agent_code: str
     agent_name: str
     text: str
+    depends_on: List[str] = field(default_factory=list)
+
+
+def _dedup_keep_order(items: Sequence[str]) -> List[str]:
+    seen = set()
+    out: List[str] = []
+    for x in items:
+        if not x or x in seen:
+            continue
+        seen.add(x)
+        out.append(x)
+    return out
+
+
+def _normalize_depends_on(items: Sequence[DispatchItem]) -> List[DispatchItem]:
+    out: List[DispatchItem] = []
+    prior_codes: List[str] = []
+    for i, it in enumerate(items):
+        deps_raw = it.depends_on if isinstance(it.depends_on, list) else []
+        deps = [d.strip() for d in deps_raw if isinstance(d, str) and d.strip()]
+        if not deps and i > 0:
+            deps = _dedup_keep_order(prior_codes)
+        allowed = set(prior_codes)
+        deps = [d for d in deps if d in allowed and d != it.agent_code]
+        deps = _dedup_keep_order(deps)
+        out.append(
+            DispatchItem(
+                agent_code=it.agent_code,
+                agent_name=it.agent_name,
+                text=it.text,
+                depends_on=deps,
+            )
+        )
+        prior_codes.append(it.agent_code)
+    return out
 
 
 def _keyword_rules() -> Dict[str, List[str]]:
@@ -552,12 +587,12 @@ async def build_dispatch_plan_llm(
                     text=seg or cleaned or text,
                 )
             )
-        return items
+        return _normalize_depends_on(items)
 
     # 1.5) log helper shortcut
     log_item = _maybe_route_log_first(text, agents)
     if log_item:
-        return [log_item]
+        return _normalize_depends_on([log_item])
 
     # 2) LLM routing
     try:
@@ -567,7 +602,7 @@ async def build_dispatch_plan_llm(
     except Exception:
         items = []
     if items:
-        return items
+        return _normalize_depends_on(items)
 
     # 3) keyword routing fallback
     kw = _keyword_routes(text)
@@ -585,17 +620,19 @@ async def build_dispatch_plan_llm(
             agent_lookup=agent_lookup,
         )
         if items2:
-            return items2
+            return _normalize_depends_on(items2)
 
     # 4) default fallback
     a = next((x for x in agents if x.code == default_agent_code), None)
-    return [
-        DispatchItem(
-            agent_code=default_agent_code,
-            agent_name=(a.name if a else default_agent_code),
-            text=text,
-        )
-    ]
+    return _normalize_depends_on(
+        [
+            DispatchItem(
+                agent_code=default_agent_code,
+                agent_name=(a.name if a else default_agent_code),
+                text=text,
+            )
+        ]
+    )
 
 
 async def build_dispatch_plan_auto(
@@ -629,11 +666,11 @@ async def build_dispatch_plan_auto(
                         text=seg or cleaned or text,
                     )
                 )
-            return items
+            return _normalize_depends_on(items)
 
         log_item = _maybe_route_log_first(text, agents)
         if log_item:
-            return [log_item]
+            return _normalize_depends_on([log_item])
         try:
             items = await _llm_route_items(
                 text=text, agents=agents, default_agent_code=default_agent_code, trace_id=trace_id
@@ -641,9 +678,11 @@ async def build_dispatch_plan_auto(
         except Exception:
             items = []
         if items:
-            return items
+            return _normalize_depends_on(items)
         a = next((x for x in agents if x.code == default_agent_code), None)
-        return [DispatchItem(agent_code=default_agent_code, agent_name=(a.name if a else default_agent_code), text=text)]
+        return _normalize_depends_on(
+            [DispatchItem(agent_code=default_agent_code, agent_name=(a.name if a else default_agent_code), text=text)]
+        )
 
     if m == "keywords":
         # mentions > keywords > default
@@ -664,11 +703,11 @@ async def build_dispatch_plan_auto(
                         text=seg or cleaned or text,
                     )
                 )
-            return items2
+            return _normalize_depends_on(items2)
 
         log_item = _maybe_route_log_first(text, agents)
         if log_item:
-            return [log_item]
+            return _normalize_depends_on([log_item])
         kw = _keyword_routes(text)
         if kw:
             codes2: List[str] = []
@@ -684,9 +723,11 @@ async def build_dispatch_plan_auto(
                 agent_lookup=agent_lookup,
             )
             if out2:
-                return out2
+                return _normalize_depends_on(out2)
         a = next((x for x in agents if x.code == default_agent_code), None)
-        return [DispatchItem(agent_code=default_agent_code, agent_name=(a.name if a else default_agent_code), text=text)]
+        return _normalize_depends_on(
+            [DispatchItem(agent_code=default_agent_code, agent_name=(a.name if a else default_agent_code), text=text)]
+        )
 
     # hybrid (default)
     return await build_dispatch_plan_llm(
@@ -727,12 +768,12 @@ def build_dispatch_plan(
                     text=seg or cleaned or text,
                 )
             )
-        return items
+        return _normalize_depends_on(items)
 
     # 1.5) log helper shortcut
     log_item = _maybe_route_log_first(text, agents)
     if log_item:
-        return [log_item]
+        return _normalize_depends_on([log_item])
 
     # 2) keyword routing
     kw = _keyword_routes(text)
@@ -750,15 +791,17 @@ def build_dispatch_plan(
             agent_lookup=agent_lookup,
         )
         if out:
-            return out
+            return _normalize_depends_on(out)
 
     # 3) fallback
     a = next((x for x in agents if x.code == default_agent_code), None)
-    return [
-        DispatchItem(
-            agent_code=default_agent_code,
-            agent_name=(a.name if a else default_agent_code),
-            text=text,
-        )
-    ]
+    return _normalize_depends_on(
+        [
+            DispatchItem(
+                agent_code=default_agent_code,
+                agent_name=(a.name if a else default_agent_code),
+                text=text,
+            )
+        ]
+    )
 
