@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from src.core.agent_routing import AgentLike, build_dispatch_plan_auto
 from src.core.config import get_settings
 from src.core.db import get_db
-from src.core.orchestrator_client import dispatch_plan
+from src.core.orchestrator_client import dispatch_plan_full
 from src.models.agent import Agent
 
 
@@ -35,22 +35,30 @@ async def route_plan(request: Request, db: Session = Depends(get_db)):
     trace_id = request.headers.get("x-trace-id") or ""
 
     # Prefer orchestrator service (lives in fun-agent-service for now).
-    items = await dispatch_plan(
+    plan0 = await dispatch_plan_full(
         text=text,
         default_agent=(settings.OPENCLAW_DEFAULT_AGENT or settings.OPENAI_DEFAULT_AGENT or "attendance"),
         mode=getattr(settings, "ROUTER_MODE", "hybrid"),
         trace_id=trace_id,
     )
-    if items:
+    items0 = plan0.get("items") if isinstance(plan0, dict) else None
+    if isinstance(items0, list) and items0:
         return JSONResponse(
             status_code=200,
             content={
                 "ok": True,
                 "mode": getattr(settings, "ROUTER_MODE", "hybrid"),
-                "agents": [str(it.get("agent") or "").strip() for it in items if isinstance(it, dict)],
+                "strategy": str(plan0.get("strategy") or ""),
+                "debug": plan0.get("debug") if isinstance(plan0.get("debug"), dict) else None,
+                "agents": [str(it.get("agent") or "").strip() for it in items0 if isinstance(it, dict)],
                 "items": [
-                    {"agent": str(it.get("agent") or "").strip(), "text": str(it.get("text") or "")}
-                    for it in items
+                    {
+                        "agent": str(it.get("agent") or "").strip(),
+                        "agent_name": str(it.get("agent_name") or ""),
+                        "text": str(it.get("text") or ""),
+                        "reason": str(it.get("reason") or ""),
+                    }
+                    for it in items0
                     if isinstance(it, dict) and str(it.get("agent") or "").strip()
                 ],
             },
@@ -81,10 +89,11 @@ async def route_plan(request: Request, db: Session = Depends(get_db)):
         content={
             "ok": True,
             "mode": getattr(settings, "ROUTER_MODE", "hybrid"),
+            "strategy": "fallback_local",
             # Backward compatible: "agents" list remains.
             "agents": [it.agent_code for it in items],
             # New: per-agent subtask text.
-            "items": [{"agent": it.agent_code, "text": it.text} for it in items],
+            "items": [{"agent": it.agent_code, "text": it.text, "reason": ""} for it in items],
         },
     )
 

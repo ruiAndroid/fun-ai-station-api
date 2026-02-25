@@ -16,12 +16,34 @@ async def dispatch_plan(
 ) -> List[Dict[str, Any]]:
     """
     Call orchestrator to build a sequential dispatch plan:
-      items: [{agent, agent_name?, text}]
+      items: [{agent, agent_name?, text, reason?}]
+    """
+    data = await dispatch_plan_full(
+        text=text,
+        default_agent=default_agent,
+        mode=mode,
+        trace_id=trace_id,
+    )
+    items = data.get("items") if isinstance(data, dict) else None
+    return items if isinstance(items, list) else []
+
+
+async def dispatch_plan_full(
+    *,
+    text: str,
+    default_agent: str,
+    mode: str,
+    trace_id: str = "",
+) -> Dict[str, Any]:
+    """
+    Call orchestrator to build a sequential dispatch plan (full response).
+    Response is expected to contain:
+      {ok, mode, default_agent, strategy?, debug?, items:[{agent, agent_name?, text, reason?}]}
     """
     settings = get_settings()
     base = (settings.ORCHESTRATOR_URL or settings.FUN_AGENT_SERVICE_URL or "").rstrip("/")
     if not base:
-        return []
+        return {}
 
     headers: Optional[Dict[str, str]] = {"x-trace-id": trace_id} if trace_id else None
     payload: Dict[str, Any] = {
@@ -33,18 +55,17 @@ async def dispatch_plan(
         async with httpx.AsyncClient(timeout=8) as client:
             resp = await client.post(f"{base}/dispatch/plan", json=payload, headers=headers)
     except Exception:
-        return []
+        return {}
 
     if resp.status_code >= 400:
-        return []
+        return {}
 
     try:
         data = resp.json()
     except Exception:
-        return []
+        return {}
 
-    items = data.get("items") if isinstance(data, dict) else None
-    return items if isinstance(items, list) else []
+    return data if isinstance(data, dict) else {}
 
 
 async def dispatch_execute(
@@ -93,4 +114,3 @@ async def dispatch_execute(
         return {}
 
     return data if isinstance(data, dict) else {}
-
