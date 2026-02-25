@@ -403,36 +403,36 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
                 }
             )
 
-      if len(results) == 1:
-          output_text = results[0]["output"]
-      else:
-          output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
-          try:
-              synth_input = _build_synthesis_input(user_input, results)
-              synth_ctx = {
-                  **context,
-                  "dispatch": {
-                      "mode": "synthesizer",
-                      "index": len(results),
-                      "total": len(results) + 1,
-                      "agent": "synthesizer",
-                      "agent_name": "汇总助手",
-                      "original_input": user_input,
-                      "depends_on": [r["agent"] for r in results if r.get("agent")],
-                      "dependencies": results,
-                      "previous": results,
-                  },
-              }
-              synth_out = await _agent_execute(
-                  agent="synthesizer",
-                  user_input=synth_input,
-                  context=synth_ctx,
-                  trace_id=trace_id,
-              )
-              if isinstance(synth_out, str) and synth_out.strip():
-                  output_text = synth_out.strip()
-          except Exception:
-              pass
+    if len(results) == 1:
+        output_text = results[0]["output"]
+    else:
+        output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
+        try:
+            synth_input = _build_synthesis_input(user_input, results)
+            synth_ctx = {
+                **context,
+                "dispatch": {
+                    "mode": "synthesizer",
+                    "index": len(results),
+                    "total": len(results) + 1,
+                    "agent": "synthesizer",
+                    "agent_name": "汇总助手",
+                    "original_input": user_input,
+                    "depends_on": [r["agent"] for r in results if r.get("agent")],
+                    "dependencies": results,
+                    "previous": results,
+                },
+            }
+            synth_out = await _agent_execute(
+                agent="synthesizer",
+                user_input=synth_input,
+                context=synth_ctx,
+                trace_id=trace_id,
+            )
+            if isinstance(synth_out, str) and synth_out.strip():
+                output_text = synth_out.strip()
+        except Exception:
+            pass
     if len(output_text) > 12000:
         output_text = output_text[:11999] + "…"
 
@@ -667,36 +667,36 @@ async def completions(request: Request, db: Session = Depends(get_db)):
                 }
             )
 
-      if len(results) == 1:
-          output_text = results[0]["output"]
-      else:
-          output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
-          try:
-              synth_input = _build_synthesis_input(user_input, results)
-              synth_ctx = {
-                  **context,
-                  "dispatch": {
-                      "mode": "synthesizer",
-                      "index": len(results),
-                      "total": len(results) + 1,
-                      "agent": "synthesizer",
-                      "agent_name": "汇总助手",
-                      "original_input": user_input,
-                      "depends_on": [r["agent"] for r in results if r.get("agent")],
-                      "dependencies": results,
-                      "previous": results,
-                  },
-              }
-              synth_out = await _agent_execute(
-                  agent="synthesizer",
-                  user_input=synth_input,
-                  context=synth_ctx,
-                  trace_id=trace_id,
-              )
-              if isinstance(synth_out, str) and synth_out.strip():
-                  output_text = synth_out.strip()
-          except Exception:
-              pass
+    if len(results) == 1:
+        output_text = results[0]["output"]
+    else:
+        output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
+        try:
+            synth_input = _build_synthesis_input(user_input, results)
+            synth_ctx = {
+                **context,
+                "dispatch": {
+                    "mode": "synthesizer",
+                    "index": len(results),
+                    "total": len(results) + 1,
+                    "agent": "synthesizer",
+                    "agent_name": "汇总助手",
+                    "original_input": user_input,
+                    "depends_on": [r["agent"] for r in results if r.get("agent")],
+                    "dependencies": results,
+                    "previous": results,
+                },
+            }
+            synth_out = await _agent_execute(
+                agent="synthesizer",
+                user_input=synth_input,
+                context=synth_ctx,
+                trace_id=trace_id,
+            )
+            if isinstance(synth_out, str) and synth_out.strip():
+                output_text = synth_out.strip()
+        except Exception:
+            pass
     if len(output_text) > 12000:
         output_text = output_text[:11999] + "…"
 
