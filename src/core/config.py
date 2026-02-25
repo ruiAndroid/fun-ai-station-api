@@ -72,6 +72,11 @@ class Settings:
     # Agent service (Node + Python runtime)
     FUN_AGENT_SERVICE_URL: str
 
+    # Orchestrator (routing + multi-agent execution)
+    # - Default: same as FUN_AGENT_SERVICE_URL
+    # - Reserved for future extraction into a standalone service.
+    ORCHESTRATOR_URL: str
+
     # Openclaw webhook (receive messages from another server)
     OPENCLAW_WEBHOOK_SECRET: str
     OPENCLAW_MAX_SKEW_SECONDS: int
@@ -107,6 +112,7 @@ class Settings:
         self.ACCESS_TOKEN_EXPIRES_MINUTES = _get_int(cfg, "ACCESS_TOKEN_EXPIRES_MINUTES", 60)
 
         self.FUN_AGENT_SERVICE_URL = cfg.get("FUN_AGENT_SERVICE_URL", "http://127.0.0.1:4010")
+        self.ORCHESTRATOR_URL = (cfg.get("ORCHESTRATOR_URL", "") or "").strip() or self.FUN_AGENT_SERVICE_URL
 
         # Openclaw webhook
         self.OPENCLAW_WEBHOOK_SECRET = cfg.get("OPENCLAW_WEBHOOK_SECRET", "")

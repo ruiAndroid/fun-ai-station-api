@@ -11,6 +11,7 @@ from src.core.config import get_settings
 from src.core.agent_routing import AgentLike, build_dispatch_plan_auto
 from src.core.agent_service_client import list_agent_service_agents
 from src.core.db import get_db
+from src.core.orchestrator_client import dispatch_execute, dispatch_plan
 from src.core.security import hash_password
 from src.models.agent import Agent
 from src.models.base import utcnow
@@ -241,76 +242,129 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     if isinstance(model, str) and model.strip().startswith("agent:"):
         plan = [{"agent": agent, "agent_name": agent, "text": user_input}]
     else:
-        rows = db.query(Agent).all()
-        agent_likes = [
-            AgentLike(
-                code=a.code,
-                name=a.name,
-                handle=a.handle or f"@{a.code}",
-                description=a.description or "",
-            )
-            for a in rows
-            if a.code
-        ]
-        existing_codes = {a.code for a in agent_likes if a.code}
-        service_agents = await list_agent_service_agents(trace_id=trace_id)
-        for item in service_agents:
-            if not isinstance(item, dict):
-                continue
-            code = str(item.get("code") or item.get("name") or "").strip()
-            if not code or code in existing_codes:
-                continue
-            name = str(item.get("display_name") or item.get("name") or code)
-            handle = str(item.get("handle") or f"@{code}")
-            desc = str(item.get("description") or "")
-            agent_likes.append(AgentLike(code=code, name=name, handle=handle, description=desc))
-            existing_codes.add(code)
-        items = await build_dispatch_plan_auto(
+        plan = []
+        # Prefer orchestrator service (lives in fun-agent-service for now).
+        items0 = await dispatch_plan(
             text=user_input,
-            agents=agent_likes,
-            default_agent_code=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
-            trace_id=trace_id,
+            default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
             mode=getattr(settings, "ROUTER_MODE", "hybrid"),
+            trace_id=trace_id,
         )
-        plan = [{"agent": it.agent_code, "agent_name": it.agent_name, "text": it.text} for it in items]
+        if isinstance(items0, list):
+            for it in items0:
+                if not isinstance(it, dict):
+                    continue
+                a0 = str(it.get("agent") or "").strip()
+                if not a0:
+                    continue
+                plan.append(
+                    {
+                        "agent": a0,
+                        "agent_name": str(it.get("agent_name") or a0),
+                        "text": str(it.get("text") or ""),
+                    }
+                )
+
         if plan:
             agent = str(plan[0]["agent"])
+        else:
+            # Fallback: local router (kept for resiliency / local dev).
+            rows = db.query(Agent).all()
+            agent_likes = [
+                AgentLike(
+                    code=a.code,
+                    name=a.name,
+                    handle=a.handle or f"@{a.code}",
+                    description=a.description or "",
+                )
+                for a in rows
+                if a.code
+            ]
+            existing_codes = {a.code for a in agent_likes if a.code}
+            service_agents = await list_agent_service_agents(trace_id=trace_id)
+            for item in service_agents:
+                if not isinstance(item, dict):
+                    continue
+                code = str(item.get("code") or item.get("name") or "").strip()
+                if not code or code in existing_codes:
+                    continue
+                name = str(item.get("display_name") or item.get("name") or code)
+                handle = str(item.get("handle") or f"@{code}")
+                desc = str(item.get("description") or "")
+                agent_likes.append(AgentLike(code=code, name=name, handle=handle, description=desc))
+                existing_codes.add(code)
+            items = await build_dispatch_plan_auto(
+                text=user_input,
+                agents=agent_likes,
+                default_agent_code=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+                trace_id=trace_id,
+                mode=getattr(settings, "ROUTER_MODE", "hybrid"),
+            )
+            plan = [{"agent": it.agent_code, "agent_name": it.agent_name, "text": it.text} for it in items]
+            if plan:
+                agent = str(plan[0]["agent"])
 
     results: List[Dict[str, str]] = []
-    for i, it in enumerate(plan):
-        agent_code = str(it["agent"])
-        agent_text = str(it.get("text") or "")
-        if not agent_text.strip():
-            # If router failed to provide a subtask, avoid broadcasting the full input to every agent.
-            if len(plan) == 1:
-                agent_text = user_input
-            else:
-                continue
-        step_ctx = {
-            **context,
-            "dispatch": {
-                "mode": "forced" if (isinstance(model, str) and model.strip().startswith("agent:")) else "auto",
-                "index": i,
-                "total": len(plan),
-                "agent": agent_code,
-                "agent_name": it.get("agent_name") or agent_code,
-                "original_input": user_input,
-                "previous": results,
-            },
-        }
-        out = await _agent_execute(agent=agent_code, user_input=agent_text, context=step_ctx, trace_id=trace_id)
-        results.append(
-            {
-                "agent": agent_code,
-                "agent_name": str(it.get("agent_name") or agent_code),
-                "output": str(out or ""),
-            }
-        )
+    output_text: str = ""
 
-    if len(results) == 1:
-        output_text = results[0]["output"]
+    # Prefer orchestrator execution (lives in fun-agent-service for now).
+    orch = await dispatch_execute(
+        text=user_input,
+        context=context,
+        default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+        mode=getattr(settings, "ROUTER_MODE", "hybrid"),
+        trace_id=trace_id,
+        items=plan,
+        forced_agent=(agent if (isinstance(model, str) and model.strip().startswith("agent:")) else ""),
+    )
+    if isinstance(orch, dict) and isinstance(orch.get("results"), list) and isinstance(orch.get("output"), str):
+        output_text = orch.get("output") or ""
+        # keep a minimal shape for persistence/debug
+        results = [
+            {
+                "agent": str(r.get("agent") or ""),
+                "agent_name": str(r.get("agent_name") or r.get("agent") or ""),
+                "output": str(r.get("output") or ""),
+            }
+            for r in (orch.get("results") or [])
+            if isinstance(r, dict)
+        ]
     else:
-        output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
+        # Fallback: execute agents sequentially (API side).
+        for i, it in enumerate(plan):
+            agent_code = str(it["agent"])
+            agent_text = str(it.get("text") or "")
+            if not agent_text.strip():
+                # If router failed to provide a subtask, avoid broadcasting the full input to every agent.
+                if len(plan) == 1:
+                    agent_text = user_input
+                else:
+                    continue
+            step_ctx = {
+                **context,
+                "dispatch": {
+                    "mode": "forced" if (isinstance(model, str) and model.strip().startswith("agent:")) else "auto",
+                    "index": i,
+                    "total": len(plan),
+                    "agent": agent_code,
+                    "agent_name": it.get("agent_name") or agent_code,
+                    "original_input": user_input,
+                    "previous": results,
+                },
+            }
+            out = await _agent_execute(agent=agent_code, user_input=agent_text, context=step_ctx, trace_id=trace_id)
+            results.append(
+                {
+                    "agent": agent_code,
+                    "agent_name": str(it.get("agent_name") or agent_code),
+                    "output": str(out or ""),
+                }
+            )
+
+        if len(results) == 1:
+            output_text = results[0]["output"]
+        else:
+            output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
     if len(output_text) > 12000:
         output_text = output_text[:11999] + "…"
 
@@ -415,75 +469,127 @@ async def completions(request: Request, db: Session = Depends(get_db)):
     if isinstance(model, str) and model.strip().startswith("agent:"):
         plan = [{"agent": agent, "agent_name": agent, "text": user_input}]
     else:
-        rows = db.query(Agent).all()
-        agent_likes = [
-            AgentLike(
-                code=a.code,
-                name=a.name,
-                handle=a.handle or f"@{a.code}",
-                description=a.description or "",
-            )
-            for a in rows
-            if a.code
-        ]
-        existing_codes = {a.code for a in agent_likes if a.code}
-        service_agents = await list_agent_service_agents(trace_id=trace_id)
-        for item in service_agents:
-            if not isinstance(item, dict):
-                continue
-            code = str(item.get("code") or item.get("name") or "").strip()
-            if not code or code in existing_codes:
-                continue
-            name = str(item.get("display_name") or item.get("name") or code)
-            handle = str(item.get("handle") or f"@{code}")
-            desc = str(item.get("description") or "")
-            agent_likes.append(AgentLike(code=code, name=name, handle=handle, description=desc))
-            existing_codes.add(code)
-        items = await build_dispatch_plan_auto(
+        plan = []
+        # Prefer orchestrator service (lives in fun-agent-service for now).
+        items0 = await dispatch_plan(
             text=user_input,
-            agents=agent_likes,
-            default_agent_code=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
-            trace_id=trace_id,
+            default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
             mode=getattr(settings, "ROUTER_MODE", "hybrid"),
+            trace_id=trace_id,
         )
-        plan = [{"agent": it.agent_code, "agent_name": it.agent_name, "text": it.text} for it in items]
+        if isinstance(items0, list):
+            for it in items0:
+                if not isinstance(it, dict):
+                    continue
+                a0 = str(it.get("agent") or "").strip()
+                if not a0:
+                    continue
+                plan.append(
+                    {
+                        "agent": a0,
+                        "agent_name": str(it.get("agent_name") or a0),
+                        "text": str(it.get("text") or ""),
+                    }
+                )
+
         if plan:
             agent = str(plan[0]["agent"])
+        else:
+            # Fallback: local router (kept for resiliency / local dev).
+            rows = db.query(Agent).all()
+            agent_likes = [
+                AgentLike(
+                    code=a.code,
+                    name=a.name,
+                    handle=a.handle or f"@{a.code}",
+                    description=a.description or "",
+                )
+                for a in rows
+                if a.code
+            ]
+            existing_codes = {a.code for a in agent_likes if a.code}
+            service_agents = await list_agent_service_agents(trace_id=trace_id)
+            for item in service_agents:
+                if not isinstance(item, dict):
+                    continue
+                code = str(item.get("code") or item.get("name") or "").strip()
+                if not code or code in existing_codes:
+                    continue
+                name = str(item.get("display_name") or item.get("name") or code)
+                handle = str(item.get("handle") or f"@{code}")
+                desc = str(item.get("description") or "")
+                agent_likes.append(AgentLike(code=code, name=name, handle=handle, description=desc))
+                existing_codes.add(code)
+            items = await build_dispatch_plan_auto(
+                text=user_input,
+                agents=agent_likes,
+                default_agent_code=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+                trace_id=trace_id,
+                mode=getattr(settings, "ROUTER_MODE", "hybrid"),
+            )
+            plan = [{"agent": it.agent_code, "agent_name": it.agent_name, "text": it.text} for it in items]
+            if plan:
+                agent = str(plan[0]["agent"])
 
     results: List[Dict[str, str]] = []
-    for i, it in enumerate(plan):
-        agent_code = str(it["agent"])
-        agent_text = str(it.get("text") or "")
-        if not agent_text.strip():
-            if len(plan) == 1:
-                agent_text = user_input
-            else:
-                continue
-        step_ctx = {
-            **context,
-            "dispatch": {
-                "mode": "forced" if (isinstance(model, str) and model.strip().startswith("agent:")) else "auto",
-                "index": i,
-                "total": len(plan),
-                "agent": agent_code,
-                "agent_name": it.get("agent_name") or agent_code,
-                "original_input": user_input,
-                "previous": results,
-            },
-        }
-        out = await _agent_execute(agent=agent_code, user_input=agent_text, context=step_ctx, trace_id=trace_id)
-        results.append(
-            {
-                "agent": agent_code,
-                "agent_name": str(it.get("agent_name") or agent_code),
-                "output": str(out or ""),
-            }
-        )
+    output_text: str = ""
 
-    if len(results) == 1:
-        output_text = results[0]["output"]
+    # Prefer orchestrator execution (lives in fun-agent-service for now).
+    orch = await dispatch_execute(
+        text=user_input,
+        context=context,
+        default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+        mode=getattr(settings, "ROUTER_MODE", "hybrid"),
+        trace_id=trace_id,
+        items=plan,
+        forced_agent=(agent if (isinstance(model, str) and model.strip().startswith("agent:")) else ""),
+    )
+    if isinstance(orch, dict) and isinstance(orch.get("results"), list) and isinstance(orch.get("output"), str):
+        output_text = orch.get("output") or ""
+        results = [
+            {
+                "agent": str(r.get("agent") or ""),
+                "agent_name": str(r.get("agent_name") or r.get("agent") or ""),
+                "output": str(r.get("output") or ""),
+            }
+            for r in (orch.get("results") or [])
+            if isinstance(r, dict)
+        ]
     else:
-        output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
+        # Fallback: execute agents sequentially (API side).
+        for i, it in enumerate(plan):
+            agent_code = str(it["agent"])
+            agent_text = str(it.get("text") or "")
+            if not agent_text.strip():
+                if len(plan) == 1:
+                    agent_text = user_input
+                else:
+                    continue
+            step_ctx = {
+                **context,
+                "dispatch": {
+                    "mode": "forced" if (isinstance(model, str) and model.strip().startswith("agent:")) else "auto",
+                    "index": i,
+                    "total": len(plan),
+                    "agent": agent_code,
+                    "agent_name": it.get("agent_name") or agent_code,
+                    "original_input": user_input,
+                    "previous": results,
+                },
+            }
+            out = await _agent_execute(agent=agent_code, user_input=agent_text, context=step_ctx, trace_id=trace_id)
+            results.append(
+                {
+                    "agent": agent_code,
+                    "agent_name": str(it.get("agent_name") or agent_code),
+                    "output": str(out or ""),
+                }
+            )
+
+        if len(results) == 1:
+            output_text = results[0]["output"]
+        else:
+            output_text = "\n\n".join([f"【{r['agent_name']}】{r['output']}" for r in results])
     if len(output_text) > 12000:
         output_text = output_text[:11999] + "…"
 

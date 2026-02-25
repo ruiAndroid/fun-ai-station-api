@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from src.core.agent_routing import AgentLike, build_dispatch_plan_auto
 from src.core.config import get_settings
 from src.core.db import get_db
+from src.core.orchestrator_client import dispatch_plan
 from src.models.agent import Agent
 
 
@@ -32,6 +33,28 @@ async def route_plan(request: Request, db: Session = Depends(get_db)):
     text = text.strip()
 
     trace_id = request.headers.get("x-trace-id") or ""
+
+    # Prefer orchestrator service (lives in fun-agent-service for now).
+    items = await dispatch_plan(
+        text=text,
+        default_agent=(settings.OPENCLAW_DEFAULT_AGENT or settings.OPENAI_DEFAULT_AGENT or "attendance"),
+        mode=getattr(settings, "ROUTER_MODE", "hybrid"),
+        trace_id=trace_id,
+    )
+    if items:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": True,
+                "mode": getattr(settings, "ROUTER_MODE", "hybrid"),
+                "agents": [str(it.get("agent") or "").strip() for it in items if isinstance(it, dict)],
+                "items": [
+                    {"agent": str(it.get("agent") or "").strip(), "text": str(it.get("text") or "")}
+                    for it in items
+                    if isinstance(it, dict) and str(it.get("agent") or "").strip()
+                ],
+            },
+        )
 
     rows: List[Agent] = db.query(Agent).all()
     agents = [
