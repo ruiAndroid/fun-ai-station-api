@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from src.core.config import get_settings
 from src.core.agent_routing import AgentLike, build_dispatch_plan_auto
 from src.core.agent_service_client import list_agent_service_agents
+from src.core.dispatch_fallback import run_plan_with_dependencies
 from src.core.orchestrator_client import dispatch_execute, dispatch_plan
 from src.core.db import get_db
 from src.core.security import hash_password
@@ -187,6 +188,67 @@ async def _call_agent_service(*, agent: str, user_input: str, context: Dict[str,
     if not isinstance(data, dict):
         raise HTTPException(status_code=502, detail="Invalid agent service response")
     return data
+
+
+def _should_skip_dispatch_item(item: Dict[str, Any], _index: int, total: int) -> bool:
+    text = str(item.get("text") or "")
+    return (not text.strip()) and total > 1
+
+
+async def _execute_plan_fallback(
+    *,
+    plan: List[Dict[str, Any]],
+    user_input: str,
+    context: Dict[str, Any],
+    trace_id: str,
+    forced_agent: str,
+    max_parallel: int,
+) -> List[Dict[str, Any]]:
+    dispatch_mode = "forced" if forced_agent else ("mentions" if "@" in user_input else "auto")
+
+    async def _run_item(
+        item: Dict[str, Any],
+        index: int,
+        total: int,
+        prior_results: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        agent_code = str(item.get("agent") or "").strip()
+        agent_text = str(item.get("text") or "")
+        if not agent_text.strip() and total == 1:
+            agent_text = user_input
+        depends_on = item.get("depends_on")
+        dependencies = _select_dependencies(prior_results, depends_on)
+        step_ctx = {
+            **context,
+            "dispatch": {
+                "mode": dispatch_mode,
+                "index": index,
+                "total": total,
+                "agent": agent_code,
+                "agent_name": item.get("agent_name") or agent_code,
+                "original_input": user_input,
+                "depends_on": depends_on if isinstance(depends_on, list) else [],
+                "dependencies": dependencies,
+                "previous": [
+                    {"agent": r.get("agent"), "output": r.get("output", "")} for r in prior_results
+                ],
+            },
+        }
+        r = await _call_agent_service(agent=agent_code, user_input=agent_text, context=step_ctx, trace_id=trace_id)
+        out = r.get("output") if isinstance(r, dict) else None
+        return {
+            "agent": agent_code,
+            "agent_name": item.get("agent_name") or agent_code,
+            "output": str(out or ""),
+            "raw": r,
+        }
+
+    return await run_plan_with_dependencies(
+        plan=plan,
+        max_parallel=max_parallel,
+        run_item=_run_item,
+        should_skip=_should_skip_dispatch_item,
+    )
 
 
 @router.post("/openclaw")
@@ -443,43 +505,15 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
         results = orch.get("results") or []
         output_text = orch.get("output") or ""
     else:
-        # Fallback: execute agents sequentially (API side).
-        for i, it in enumerate(plan):
-            agent_code = str(it["agent"])
-            agent_text = str(it.get("text") or "")
-            if not agent_text.strip():
-                if len(plan) == 1:
-                    agent_text = user_input
-                else:
-                    continue
-            depends_on = it.get("depends_on")
-            dependencies = _select_dependencies(results, depends_on)
-            step_ctx = {
-                **context,
-                "dispatch": {
-                    "mode": "forced" if forced_agent else ("mentions" if "@" in user_input else "auto"),
-                    "index": i,
-                    "total": len(plan),
-                    "agent": agent_code,
-                    "agent_name": it.get("agent_name") or agent_code,
-                    "original_input": user_input,
-                    "depends_on": depends_on if isinstance(depends_on, list) else [],
-                    "dependencies": dependencies,
-                    "previous": [
-                        {"agent": r.get("agent"), "output": r.get("output", "")} for r in results
-                    ],
-                },
-            }
-            r = await _call_agent_service(agent=agent_code, user_input=agent_text, context=step_ctx, trace_id=trace_id)
-            out = r.get("output") if isinstance(r, dict) else None
-            results.append(
-                {
-                    "agent": agent_code,
-                    "agent_name": it.get("agent_name") or agent_code,
-                    "output": str(out or ""),
-                    "raw": r,
-                }
-            )
+        # Fallback: execute agents with dependency-aware parallelism (API side).
+        results = await _execute_plan_fallback(
+            plan=plan,
+            user_input=user_input,
+            context=context,
+            trace_id=trace_id,
+            forced_agent=forced_agent,
+            max_parallel=getattr(settings, "DISPATCH_MAX_PARALLEL", 1),
+        )
 
         if len(results) == 1:
             output_text = results[0]["output"]

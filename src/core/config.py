@@ -93,6 +93,8 @@ class Settings:
     # - llm:    mentions > LLM route > default
     # - keywords:mentions > keyword route > default
     ROUTER_MODE: str
+    # Fallback dispatch parallelism (API-side only)
+    DISPATCH_MAX_PARALLEL: int
 
     def __init__(self, cfg: Optional[Dict[str, str]] = None):
         cfg = cfg or _load_config()
@@ -127,6 +129,7 @@ class Settings:
 
         # Routing
         self.ROUTER_MODE = (cfg.get("ROUTER_MODE", "hybrid") or "hybrid").strip().lower()
+        self.DISPATCH_MAX_PARALLEL = _get_int(cfg, "DISPATCH_MAX_PARALLEL", 3)
 
     @property
     def sqlalchemy_database_uri(self) -> str:
