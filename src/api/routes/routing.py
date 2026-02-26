@@ -34,10 +34,15 @@ async def route_plan(request: Request, db: Session = Depends(get_db)):
 
     trace_id = request.headers.get("x-trace-id") or ""
 
+    req_default_agent = payload.get("default_agent") or payload.get("default_agent_code") or ""
+    req_default_agent = req_default_agent if isinstance(req_default_agent, str) else str(req_default_agent or "")
+    req_default_agent = req_default_agent.strip()
+    default_agent = req_default_agent or (settings.OPENCLAW_DEFAULT_AGENT or settings.OPENAI_DEFAULT_AGENT or "attendance")
+
     # Prefer orchestrator service (lives in fun-agent-service for now).
     plan0 = await dispatch_plan_full(
         text=text,
-        default_agent=(settings.OPENCLAW_DEFAULT_AGENT or settings.OPENAI_DEFAULT_AGENT or "attendance"),
+        default_agent=default_agent,
         mode=getattr(settings, "ROUTER_MODE", "hybrid"),
         trace_id=trace_id,
     )
@@ -80,7 +85,7 @@ async def route_plan(request: Request, db: Session = Depends(get_db)):
     items = await build_dispatch_plan_auto(
         text=text,
         agents=agents,
-        default_agent_code=(settings.OPENCLAW_DEFAULT_AGENT or settings.OPENAI_DEFAULT_AGENT or "attendance"),
+        default_agent_code=default_agent,
         trace_id=trace_id,
         mode=getattr(settings, "ROUTER_MODE", "hybrid"),
     )
