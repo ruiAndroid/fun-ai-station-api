@@ -59,6 +59,11 @@ python -m src.scheduler_worker --poll 5 --batch 10
 python -m src.scheduler_worker --once
 ```
 
+### Docs
+
+- Orchestrator：`docs/orchestrator.md`
+- 定时任务模块：`docs/scheduled-tasks.md`
+
 ### API docs
 - Swagger UI: `http://localhost:8001/docs`
 - OpenAPI JSON: `http://localhost:8001/openapi.json`

@@ -68,28 +68,24 @@ def compute_next_run(task: ScheduledTask, *, after_utc: datetime) -> Optional[da
     return _to_utc_naive(next_local_aware)
 
 
-def parse_payload(task: ScheduledTask) -> Tuple[str, Dict[str, Any], str, str, str, Optional[List[Dict[str, Any]]]]:
+def parse_payload(
+    task: ScheduledTask,
+) -> Tuple[str, Dict[str, Any], str, str, str, Optional[List[Dict[str, Any]]]]:
     """
     Normalize task.payload into orchestrator dispatch_execute parameters.
 
-    payload fields (all optional):
-      - text: str
-      - context: dict
-      - default_agent: str
-      - mode: str
-      - forced_agent: str
-      - items: list (optional precomputed plan)
+    Note:
+      - We intentionally do NOT allow per-task agent forcing (forced_agent/items/default_agent),
+        to avoid confusing the orchestrator and to keep routing consistent.
     """
     settings = get_settings()
     raw = task.payload or {}
     text = str(raw.get("text") or raw.get("input") or "")
     context = raw.get("context") if isinstance(raw.get("context"), dict) else {}
-    default_agent = str(raw.get("default_agent") or settings.OPENCLAW_DEFAULT_AGENT or "attendance")
-    mode = str(raw.get("mode") or settings.ROUTER_MODE or "hybrid")
-    forced_agent = str(raw.get("forced_agent") or raw.get("agent") or "")
-    items = raw.get("items")
-    items_list = items if isinstance(items, list) else None
-    trace_id = str(raw.get("trace_id") or "")
+    default_agent = str(settings.OPENCLAW_DEFAULT_AGENT or "attendance")
+    mode = str(settings.ROUTER_MODE or "hybrid")
+    forced_agent = ""
+    items_list = None
     return text, context, default_agent, mode, forced_agent, items_list
 
 

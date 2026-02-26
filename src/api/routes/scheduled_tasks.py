@@ -22,6 +22,25 @@ from src.schemas.scheduled_task import (
 
 router = APIRouter(prefix="/scheduled-tasks", tags=["scheduled-tasks"])
 
+_PAYLOAD_DISALLOWED_KEYS = {
+    # disallow forcing a specific agent / precomputed plan (keep routing consistent)
+    "agent",
+    "forced_agent",
+    "items",
+    # disallow per-task routing overrides for now (use global settings)
+    "default_agent",
+    "mode",
+}
+
+
+def _sanitize_payload(payload: object) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    out = dict(payload)
+    for k in _PAYLOAD_DISALLOWED_KEYS:
+        out.pop(k, None)
+    return out
+
 
 def _to_utc_naive(dt: datetime) -> datetime:
     if dt.tzinfo is None:
@@ -124,7 +143,7 @@ def create_task(
         schedule_type=schedule_type,
         schedule_expr=schedule_expr,
         timezone=tz_name,
-        payload=payload.payload or {},
+        payload=_sanitize_payload(payload.payload),
         next_run_at=next_run_at,
         last_run_at=None,
         locked_by=None,
@@ -160,7 +179,7 @@ def update_task(
     if payload.timezone is not None:
         task.timezone = (payload.timezone or "UTC").strip() or "UTC"
     if payload.payload is not None:
-        task.payload = payload.payload or {}
+        task.payload = _sanitize_payload(payload.payload)
     if payload.next_run_at is not None:
         task.next_run_at = payload.next_run_at
 
