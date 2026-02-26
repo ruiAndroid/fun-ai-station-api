@@ -59,10 +59,22 @@ python -m src.scheduler_worker --poll 5 --batch 10
 python -m src.scheduler_worker --once
 ```
 
+### Long task worker（长任务 worker）
+
+长任务用于执行可能超过请求超时的操作（例如：执行一次编排并返回最终 output）。创建长任务后，需要启动一个单独的 worker 进程来轮询数据库并执行：
+
+```bash
+cd fun-ai-station-api
+python -m src.long_task_worker --poll 2 --batch 10
+```
+
+systemd 模板（部署用）：`deploy/systemd/fun-ai-station-long-scheduler.service`
+
 ### Docs
 
 - Orchestrator：`docs/orchestrator.md`
 - 定时任务模块：`docs/scheduled-tasks.md`
+- 长任务模块：`docs/long-tasks.md`
 
 ### API docs
 - Swagger UI: `http://localhost:8001/docs`
@@ -84,4 +96,8 @@ python -m src.scheduler_worker --once
 - `PUT /scheduled-tasks/{task_id}`
 - `DELETE /scheduled-tasks/{task_id}`
 - `GET /scheduled-tasks/{task_id}/runs`
+- `GET /long-tasks`
+- `POST /long-tasks/orchestrator-execute`
+- `GET /long-tasks/{task_id}`
+- `POST /long-tasks/{task_id}/cancel`
 

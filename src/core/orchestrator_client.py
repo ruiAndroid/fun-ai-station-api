@@ -77,6 +77,7 @@ async def dispatch_execute(
     trace_id: str = "",
     forced_agent: str = "",
     items: Optional[List[Dict[str, Any]]] = None,
+    timeout_seconds: int = 60,
 ) -> Dict[str, Any]:
     """
     Call orchestrator to execute (plan + run agents sequentially):
@@ -100,7 +101,7 @@ async def dispatch_execute(
         payload["items"] = items
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=max(1, int(timeout_seconds or 60))) as client:
             resp = await client.post(f"{base}/dispatch/execute", json=payload, headers=headers)
     except Exception:
         return {}

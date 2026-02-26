@@ -100,6 +100,9 @@ class Settings:
     SCHEDULER_DEFAULT_AGENT: str
     SCHEDULER_ROUTER_MODE: str
 
+    # Long tasks
+    LONG_TASK_EXECUTE_TIMEOUT_SECONDS: int
+
     def __init__(self, cfg: Optional[Dict[str, str]] = None):
         cfg = cfg or _load_config()
         self.APP_NAME = cfg.get("APP_NAME", "fun-ai-station-api")
@@ -138,6 +141,9 @@ class Settings:
         # Scheduler defaults (keep empty => fall back to OPENCLAW_DEFAULT_AGENT / ROUTER_MODE)
         self.SCHEDULER_DEFAULT_AGENT = (cfg.get("SCHEDULER_DEFAULT_AGENT", "") or "").strip()
         self.SCHEDULER_ROUTER_MODE = (cfg.get("SCHEDULER_ROUTER_MODE", "") or "").strip().lower()
+
+        # Long tasks
+        self.LONG_TASK_EXECUTE_TIMEOUT_SECONDS = _get_int(cfg, "LONG_TASK_EXECUTE_TIMEOUT_SECONDS", 600)
 
     @property
     def sqlalchemy_database_uri(self) -> str:
