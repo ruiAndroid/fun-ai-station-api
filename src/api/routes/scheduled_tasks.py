@@ -42,6 +42,15 @@ def _sanitize_payload(payload: object) -> dict:
     return out
 
 
+def _as_utc_aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        # DB stores naive UTC; tag it so clients can interpret correctly
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _to_utc_naive(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt
@@ -88,10 +97,10 @@ def _task_out(t: ScheduledTask) -> ScheduledTaskOut:
         schedule_expr=t.schedule_expr,
         timezone=t.timezone,
         payload=t.payload or {},
-        next_run_at=t.next_run_at,
-        last_run_at=t.last_run_at,
-        created_at=t.created_at,
-        updated_at=t.updated_at,
+        next_run_at=_as_utc_aware(t.next_run_at),
+        last_run_at=_as_utc_aware(t.last_run_at),
+        created_at=_as_utc_aware(t.created_at),
+        updated_at=_as_utc_aware(t.updated_at),
     )
 
 
@@ -102,8 +111,8 @@ def _run_out(r: ScheduledTaskRun) -> ScheduledTaskRunOut:
         user_id=r.user_id,
         status=r.status,
         trace_id=r.trace_id,
-        started_at=r.started_at,
-        finished_at=r.finished_at,
+        started_at=_as_utc_aware(r.started_at),
+        finished_at=_as_utc_aware(r.finished_at),
         error=r.error,
         result=r.result or {},
     )
