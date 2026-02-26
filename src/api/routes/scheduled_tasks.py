@@ -5,7 +5,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
 from croniter import croniter
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
 
@@ -201,6 +201,8 @@ def delete_task(
     task = db.get(ScheduledTask, task_id)
     if not task or task.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Task not found")
+    # keep DB clean: remove run history together with the task
+    db.execute(delete(ScheduledTaskRun).where(ScheduledTaskRun.task_id == task_id))
     db.delete(task)
     db.commit()
     return {"ok": True}
