@@ -27,7 +27,7 @@ _PAYLOAD_DISALLOWED_KEYS = {
     "agent",
     "forced_agent",
     "items",
-    # disallow per-task routing overrides for now (use global settings)
+    # disallow per-task routing overrides (use global settings)
     "default_agent",
     "mode",
 }

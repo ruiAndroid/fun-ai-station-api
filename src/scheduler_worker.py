@@ -73,17 +73,23 @@ def parse_payload(
 ) -> Tuple[str, Dict[str, Any], str, str, str, Optional[List[Dict[str, Any]]]]:
     """
     Normalize task.payload into orchestrator dispatch_execute parameters.
-
-    Note:
-      - We intentionally do NOT allow per-task agent forcing (forced_agent/items/default_agent),
-        to avoid confusing the orchestrator and to keep routing consistent.
     """
     settings = get_settings()
     raw = task.payload or {}
     text = str(raw.get("text") or raw.get("input") or "")
     context = raw.get("context") if isinstance(raw.get("context"), dict) else {}
-    default_agent = str(settings.OPENCLAW_DEFAULT_AGENT or "attendance")
-    mode = str(settings.ROUTER_MODE or "hybrid")
+
+    # Do NOT allow per-task forcing/overrides; only use scheduler defaults.
+    default_agent = str(
+        (settings.SCHEDULER_DEFAULT_AGENT or "").strip()
+        or (settings.OPENCLAW_DEFAULT_AGENT or "").strip()
+        or "attendance"
+    )
+    mode = str(
+        (settings.SCHEDULER_ROUTER_MODE or "").strip().lower()
+        or (settings.ROUTER_MODE or "").strip().lower()
+        or "hybrid"
+    )
     forced_agent = ""
     items_list = None
     return text, context, default_agent, mode, forced_agent, items_list

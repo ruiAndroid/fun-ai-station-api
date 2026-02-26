@@ -76,9 +76,7 @@ curl -X POST "$API_BASE/scheduled-tasks" \
     "timezone": "UTC",
     "payload": {
       "text": "每天 9 点提醒我打卡",
-      "mode": "hybrid",
-      "default_agent": "attendance",
-      "forced_agent": ""
+      "context": {"channel":"scheduled_task"}
     }
   }'
 ```
@@ -117,10 +115,9 @@ curl -X POST "$API_BASE/scheduled-tasks" \
 - 解析 `payload`（`parse_payload`）映射到 orchestrator：
   - `text`：`payload.text`（兼容 `payload.input`）
   - `context`：dict（worker 会 best-effort 注入 `user_id` / `scheduled_task_id`）
-  - `default_agent`：缺省走 `OPENCLAW_DEFAULT_AGENT`，再缺省为 `attendance`
-  - `mode`：缺省走 `ROUTER_MODE`，再缺省为 `hybrid`
-  - `forced_agent`：可选强制 agent
-  - `items`：可选预先编排好的计划（跳过 plan 阶段）
+  - `default_agent`：缺省走 `SCHEDULER_DEFAULT_AGENT`；否则 `OPENCLAW_DEFAULT_AGENT`；再缺省为 `attendance`
+  - `mode`：缺省走 `SCHEDULER_ROUTER_MODE`；否则 `ROUTER_MODE`；再缺省为 `hybrid`
+  - `forced_agent/items`：当前不支持在 payload 中覆盖（避免用户绕过编排层）
 - 调用 `dispatch_execute(...)`：
   - 成功：run 标记 `success`，task 计算下一次执行时间
   - 失败：run 标记 `failed`，task 做一个基础退避（当前实现：+60s，避免热循环）
@@ -168,4 +165,3 @@ curl -X POST "$API_BASE/scheduled-tasks" \
 - cron 时间不对：
   - 确认 `timezone` 是否正确（cron 是按该时区解释后再转换为 UTC）
   - `schedule_expr` 为空会回退到 `* * * * *`（每分钟）
-

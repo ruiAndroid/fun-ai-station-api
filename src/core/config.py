@@ -96,6 +96,10 @@ class Settings:
     # Fallback dispatch parallelism (API-side only)
     DISPATCH_MAX_PARALLEL: int
 
+    # Scheduler worker routing defaults (optional; per-task payload can override)
+    SCHEDULER_DEFAULT_AGENT: str
+    SCHEDULER_ROUTER_MODE: str
+
     def __init__(self, cfg: Optional[Dict[str, str]] = None):
         cfg = cfg or _load_config()
         self.APP_NAME = cfg.get("APP_NAME", "fun-ai-station-api")
@@ -130,6 +134,10 @@ class Settings:
         # Routing
         self.ROUTER_MODE = (cfg.get("ROUTER_MODE", "hybrid") or "hybrid").strip().lower()
         self.DISPATCH_MAX_PARALLEL = _get_int(cfg, "DISPATCH_MAX_PARALLEL", 3)
+
+        # Scheduler defaults (keep empty => fall back to OPENCLAW_DEFAULT_AGENT / ROUTER_MODE)
+        self.SCHEDULER_DEFAULT_AGENT = (cfg.get("SCHEDULER_DEFAULT_AGENT", "") or "").strip()
+        self.SCHEDULER_ROUTER_MODE = (cfg.get("SCHEDULER_ROUTER_MODE", "") or "").strip().lower()
 
     @property
     def sqlalchemy_database_uri(self) -> str:
