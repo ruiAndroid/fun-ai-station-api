@@ -44,6 +44,21 @@ alembic upgrade head
 uvicorn src.main:app --reload --port 8001
 ```
 
+### Scheduler worker (方案 2：独立进程)
+
+启动一个单独的 worker 进程，用于轮询数据库并触发用户定时任务：
+
+```bash
+cd fun-ai-station-api
+python -m src.scheduler_worker --poll 5 --batch 10
+```
+
+单次执行（调试用）：
+
+```bash
+python -m src.scheduler_worker --once
+```
+
 ### API docs
 - Swagger UI: `http://localhost:8001/docs`
 - OpenAPI JSON: `http://localhost:8001/openapi.json`
@@ -59,4 +74,9 @@ uvicorn src.main:app --reload --port 8001
 - `GET /chat/sessions/{session_id}`
 - `POST /chat/sessions/{session_id}/messages`
 - `GET /chat/sessions/{session_id}/messages`
+- `GET /scheduled-tasks`
+- `POST /scheduled-tasks`
+- `PUT /scheduled-tasks/{task_id}`
+- `DELETE /scheduled-tasks/{task_id}`
+- `GET /scheduled-tasks/{task_id}/runs`
 
