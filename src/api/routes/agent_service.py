@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
 
 from src.core.config import get_settings
+from typing import Any, Dict
 
 router = APIRouter(prefix="/agent-service", tags=["agent-service"])
 
@@ -53,6 +54,22 @@ def _inject_user_id(payload: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 @router.get("/agents")
 async def list_agents(request: Request):
     url = f"{_service_base()}/agents"
+    trace_id = request.headers.get("x-trace-id")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, headers={"x-trace-id": trace_id} if trace_id else None)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Agent service error: {exc}")
+    try:
+        data = resp.json()
+    except Exception:
+        data = resp.text
+    return JSONResponse(status_code=resp.status_code, content=data)
+
+
+@router.get("/skills")
+async def list_skills(request: Request):
+    url = f"{_service_base()}/skills"
     trace_id = request.headers.get("x-trace-id")
     try:
         async with httpx.AsyncClient(timeout=10) as client:
