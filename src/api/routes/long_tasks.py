@@ -151,3 +151,20 @@ def cancel_long_task(
     db.refresh(t)
     return _task_out(t)
 
+
+@router.delete("/{task_id}")
+def delete_long_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    t = db.get(LongTask, task_id)
+    if not t or t.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if (t.status or "").strip().lower() == "running":
+        raise HTTPException(status_code=409, detail="Task is running; cancel first")
+
+    db.delete(t)
+    db.commit()
+    return {"ok": True}

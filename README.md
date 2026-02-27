@@ -100,4 +100,5 @@ systemd 模板（部署用）：`deploy/systemd/fun-ai-station-long-scheduler.se
 - `POST /long-tasks/orchestrator-execute`
 - `GET /long-tasks/{task_id}`
 - `POST /long-tasks/{task_id}/cancel`
+- `DELETE /long-tasks/{task_id}`
 
