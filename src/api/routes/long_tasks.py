@@ -92,7 +92,7 @@ def create_orchestrator_execute_task(
         (payload.default_agent or "").strip()
         or (settings.OPENAI_DEFAULT_AGENT or "").strip()
         or (settings.OPENCLAW_DEFAULT_AGENT or "").strip()
-        or "attendance"
+        or "general"
     )
     mode = (payload.mode or "").strip().lower() or (settings.ROUTER_MODE or "hybrid").strip().lower()
 

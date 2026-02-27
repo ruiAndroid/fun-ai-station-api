@@ -278,7 +278,7 @@ async def list_models(request: Request):
                 "owned_by": "fun-ai-station",
             },
             {
-                "id": settings.OPENAI_DEFAULT_AGENT or "attendance",
+                "id": settings.OPENAI_DEFAULT_AGENT or "general",
                 "object": "model",
                 "created": now,
                 "owned_by": "fun-ai-station",
@@ -306,9 +306,9 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
 
     # We accept model but default to configured agent.
     model = payload.get("model")
-    agent = settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"
+    agent = settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "general"
     if isinstance(model, str) and model.strip():
-        # If caller passes model like "agent:attendance", respect it.
+        # If caller passes model like "agent:general", respect it.
         m = model.strip()
         if m.startswith("agent:") and m.split("agent:", 1)[1].strip():
             agent = m.split("agent:", 1)[1].strip()
@@ -332,7 +332,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
         # Prefer orchestrator service (lives in fun-agent-service for now).
         items0 = await dispatch_plan(
             text=user_input,
-            default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+            default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "general"),
             mode=getattr(settings, "ROUTER_MODE", "hybrid"),
             trace_id=trace_id,
         )
@@ -383,7 +383,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
             items = await build_dispatch_plan_auto(
                 text=user_input,
                 agents=agent_likes,
-                default_agent_code=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+                default_agent_code=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "general"),
                 trace_id=trace_id,
                 mode=getattr(settings, "ROUTER_MODE", "hybrid"),
             )
@@ -406,7 +406,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db)):
     orch = await dispatch_execute(
         text=user_input,
         context=context,
-        default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+        default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "general"),
         mode=getattr(settings, "ROUTER_MODE", "hybrid"),
         trace_id=trace_id,
         items=plan,
@@ -551,7 +551,7 @@ async def completions(request: Request, db: Session = Depends(get_db)):
         user_input = user_input[:7999] + "…"
 
     model = payload.get("model")
-    agent = settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"
+    agent = settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "general"
     if isinstance(model, str) and model.strip():
         m = model.strip()
         if m.startswith("agent:") and m.split("agent:", 1)[1].strip():
@@ -573,7 +573,7 @@ async def completions(request: Request, db: Session = Depends(get_db)):
         # Prefer orchestrator service (lives in fun-agent-service for now).
         items0 = await dispatch_plan(
             text=user_input,
-            default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+            default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "general"),
             mode=getattr(settings, "ROUTER_MODE", "hybrid"),
             trace_id=trace_id,
         )
@@ -624,7 +624,7 @@ async def completions(request: Request, db: Session = Depends(get_db)):
             items = await build_dispatch_plan_auto(
                 text=user_input,
                 agents=agent_likes,
-                default_agent_code=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+                default_agent_code=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "general"),
                 trace_id=trace_id,
                 mode=getattr(settings, "ROUTER_MODE", "hybrid"),
             )
@@ -647,7 +647,7 @@ async def completions(request: Request, db: Session = Depends(get_db)):
     orch = await dispatch_execute(
         text=user_input,
         context=context,
-        default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+        default_agent=(settings.OPENAI_DEFAULT_AGENT or settings.OPENCLAW_DEFAULT_AGENT or "general"),
         mode=getattr(settings, "ROUTER_MODE", "hybrid"),
         trace_id=trace_id,
         items=plan,

@@ -81,7 +81,7 @@ def _sync_agent_service_agents(db: Session) -> None:
 @router.get("", response_model=List[AgentOut])
 def list_agents(db: Session = Depends(get_db)):
     _sync_agent_service_agents(db)
-    agents = db.query(Agent).all()
+    agents = db.query(Agent).order_by(Agent.code.asc()).all()
     return [
         AgentOut(
             id=a.id,

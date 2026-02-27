@@ -130,13 +130,13 @@ class Settings:
         # Openclaw webhook
         self.OPENCLAW_WEBHOOK_SECRET = cfg.get("OPENCLAW_WEBHOOK_SECRET", "")
         self.OPENCLAW_MAX_SKEW_SECONDS = _get_int(cfg, "OPENCLAW_MAX_SKEW_SECONDS", 300)
-        self.OPENCLAW_DEFAULT_AGENT = cfg.get("OPENCLAW_DEFAULT_AGENT", "attendance")
+        self.OPENCLAW_DEFAULT_AGENT = cfg.get("OPENCLAW_DEFAULT_AGENT", "general")
         self.OPENCLAW_SYSTEM_USER_EMAIL = cfg.get("OPENCLAW_SYSTEM_USER_EMAIL", "openclaw@local")
         self.OPENCLAW_SYSTEM_USER_PASSWORD = cfg.get("OPENCLAW_SYSTEM_USER_PASSWORD", "change_me")
 
         # OpenAI-compatible API
         self.OPENAI_API_KEY = cfg.get("OPENAI_API_KEY", "")
-        self.OPENAI_DEFAULT_AGENT = cfg.get("OPENAI_DEFAULT_AGENT", self.OPENCLAW_DEFAULT_AGENT or "attendance")
+        self.OPENAI_DEFAULT_AGENT = cfg.get("OPENAI_DEFAULT_AGENT", self.OPENCLAW_DEFAULT_AGENT or "general")
 
         # Routing
         self.ROUTER_MODE = (cfg.get("ROUTER_MODE", "hybrid") or "hybrid").strip().lower()

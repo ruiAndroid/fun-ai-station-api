@@ -67,49 +67,6 @@ def _normalize_depends_on(items: Sequence[DispatchItem]) -> List[DispatchItem]:
 
 def _keyword_rules() -> Dict[str, List[str]]:
     return {
-        "attendance": [
-            "打卡",
-            "签到",
-            "签退",
-            "下班",
-            "请假",
-            "加班",
-            "考勤",
-            "补卡",
-            "迟到",
-            "早退",
-            "人事",
-            "HR",
-        ],
-        "expense": [
-            "报销",
-            "发票",
-            "费用",
-            "差旅",
-            "打车",
-            "出差",
-            "报账",
-            "财务",
-            "付款",
-            "对公",
-        ],
-        "admin": [
-            "行政",
-            "维修",
-            "报修",
-            "坏了",
-            "领用",
-            "领取",
-            "申领",
-            "门禁",
-            "工位",
-            "会议室",
-            "快递",
-            "保洁",
-            "网络",
-            "打印机",
-            "电脑",
-        ],
         "log": [
             "log",
             "日志",
@@ -121,6 +78,16 @@ def _keyword_rules() -> Dict[str, List[str]]:
             "err.log",
             "/var/log",
             "/logs/",
+        ],
+        "mail": [
+            "邮件",
+            "邮箱",
+            "发邮件",
+            "发送邮件",
+            "写邮件",
+            "回邮件",
+            "email",
+            "mail",
         ],
     }
 
@@ -269,13 +236,6 @@ def _score_clause_for_agent(clause: str, agent_code: str) -> int:
     for kw in kws:
         if kw and kw in clause:
             score += 3
-    # mild boosts for common patterns
-    if agent_code == "attendance" and ("迟到" in clause or "早退" in clause):
-        score += 2
-    if agent_code == "expense" and ("金额" in clause or "票" in clause):
-        score += 1
-    if agent_code == "admin" and ("联系" in clause or "坏" in clause or "修" in clause):
-        score += 1
     if agent_code == "log":
         if re.search(r"(/[^\s\"']+\.(?:log|out|err|txt))", clause, flags=re.IGNORECASE):
             score += 8
@@ -289,7 +249,7 @@ def _score_clause_for_agent(clause: str, agent_code: str) -> int:
 def _maybe_route_log_first(text: str, agents: Sequence[AgentLike]) -> Optional[DispatchItem]:
     """
     If the user message looks like "view this log file", route directly to log agent.
-    This avoids defaulting to attendance/other when the user didn't explicitly @log助手.
+    This avoids falling back to the default agent when the user didn't explicitly @log助手.
     """
     if not text:
         return None

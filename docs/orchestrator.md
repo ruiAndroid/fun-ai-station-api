@@ -103,7 +103,7 @@ sequenceDiagram
 {
   "text": "用户输入",
   "mode": "hybrid",
-  "default_agent": "attendance",
+  "default_agent": "general",
   "context": { "trace_id": "..." }
 }
 ```
@@ -113,10 +113,10 @@ sequenceDiagram
 {
   "ok": true,
   "mode": "hybrid",
-  "default_agent": "attendance",
+  "default_agent": "general",
   "items": [
-    { "agent": "attendance", "agent_name": "考勤助手", "text": "...", "depends_on": [] },
-    { "agent": "expense", "agent_name": "财务报销", "text": "...", "depends_on": ["attendance"] }
+    { "agent": "log", "agent_name": "log助手", "text": "...", "depends_on": [] },
+    { "agent": "mail", "agent_name": "邮件助手", "text": "...", "depends_on": ["log"] }
   ]
 }
 ```
@@ -132,11 +132,11 @@ sequenceDiagram
   {
     "text": "用户输入",
     "items": [
-      { "agent": "attendance", "text": "...", "depends_on": [] },
-      { "agent": "expense", "text": "...", "depends_on": ["attendance"] }
+      { "agent": "log", "text": "...", "depends_on": [] },
+      { "agent": "mail", "text": "...", "depends_on": ["log"] }
     ],
     "mode": "hybrid",
-    "default_agent": "attendance",
+    "default_agent": "general",
     "context": { "trace_id": "..." }
   }
 ```
@@ -145,9 +145,13 @@ sequenceDiagram
 ```json
 {
   "ok": true,
-  "items": [{ "agent": "attendance", "text": "..." }],
+  "items": [
+    { "agent": "log", "text": "..." },
+    { "agent": "mail", "text": "..." }
+  ],
   "results": [
-    { "agent": "attendance", "agent_name": "考勤助手", "output": "..." }
+    { "agent": "log", "agent_name": "log助手", "output": "..." },
+    { "agent": "mail", "agent_name": "邮件助手", "output": "..." }
   ],
   "output": "聚合后的最终文本"
 }

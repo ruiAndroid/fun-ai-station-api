@@ -61,7 +61,7 @@ async def route_plan(request: Request, db: Session = Depends(get_db)):
     req_default_agent = payload.get("default_agent") or payload.get("default_agent_code") or ""
     req_default_agent = req_default_agent if isinstance(req_default_agent, str) else str(req_default_agent or "")
     req_default_agent = req_default_agent.strip()
-    default_agent = req_default_agent or (settings.OPENCLAW_DEFAULT_AGENT or settings.OPENAI_DEFAULT_AGENT or "attendance")
+    default_agent = req_default_agent or (settings.OPENCLAW_DEFAULT_AGENT or settings.OPENAI_DEFAULT_AGENT or "general")
 
     user_id = _try_get_user_id(request)
     payload_context = payload.get("context")

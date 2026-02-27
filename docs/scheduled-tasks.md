@@ -75,7 +75,7 @@ curl -X POST "$API_BASE/scheduled-tasks" \
     "schedule_expr": "60",
     "timezone": "UTC",
     "payload": {
-      "text": "每天 9 点提醒我打卡",
+      "text": "每天 9 点提醒我写工作日报",
       "context": {"channel":"scheduled_task"}
     }
   }'
@@ -115,7 +115,7 @@ curl -X POST "$API_BASE/scheduled-tasks" \
 - 解析 `payload`（`parse_payload`）映射到 orchestrator：
   - `text`：`payload.text`（兼容 `payload.input`）
   - `context`：dict（worker 会 best-effort 注入 `user_id` / `scheduled_task_id`）
-  - `default_agent`：缺省走 `SCHEDULER_DEFAULT_AGENT`；否则 `OPENCLAW_DEFAULT_AGENT`；再缺省为 `attendance`
+  - `default_agent`：缺省走 `SCHEDULER_DEFAULT_AGENT`；否则 `OPENCLAW_DEFAULT_AGENT`；再缺省为 `general`
   - `mode`：缺省走 `SCHEDULER_ROUTER_MODE`；否则 `ROUTER_MODE`；再缺省为 `hybrid`
   - `forced_agent/items`：当前不支持在 payload 中覆盖（避免用户绕过编排层）
 - 调用 `dispatch_execute(...)`：

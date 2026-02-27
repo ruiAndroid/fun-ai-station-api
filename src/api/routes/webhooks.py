@@ -335,7 +335,7 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
         # Prefer orchestrator service (lives in fun-agent-service for now).
         items0 = await dispatch_plan(
             text=user_input,
-            default_agent=(settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+            default_agent=(settings.OPENCLAW_DEFAULT_AGENT or "general"),
             mode=getattr(settings, "ROUTER_MODE", "hybrid"),
             trace_id=trace_id,
         )
@@ -387,7 +387,7 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
             items = await build_dispatch_plan_auto(
                 text=user_input,
                 agents=agent_likes,
-                default_agent_code=(settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+                default_agent_code=(settings.OPENCLAW_DEFAULT_AGENT or "general"),
                 trace_id=trace_id,
                 mode=getattr(settings, "ROUTER_MODE", "hybrid"),
             )
@@ -495,7 +495,7 @@ async def openclaw_webhook(request: Request, db: Session = Depends(get_db)):
     orch = await dispatch_execute(
         text=user_input,
         context=context,
-        default_agent=(settings.OPENCLAW_DEFAULT_AGENT or "attendance"),
+        default_agent=(settings.OPENCLAW_DEFAULT_AGENT or "general"),
         mode=getattr(settings, "ROUTER_MODE", "hybrid"),
         trace_id=trace_id,
         items=plan,

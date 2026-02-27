@@ -20,7 +20,7 @@
 
 - `OPENCLAW_WEBHOOK_SECRET`: HMAC 签名密钥（务必改成强随机）
 - `OPENCLAW_MAX_SKEW_SECONDS`: 时间戳容忍偏移（默认 300 秒）
-- `OPENCLAW_DEFAULT_AGENT`: 默认智能体（默认 `attendance`，以 `GET /api/agent-service/agents` 输出为准）
+- `OPENCLAW_DEFAULT_AGENT`: 默认智能体（默认 `general`，以 `GET /api/agent-service/agents` 输出为准）
 
 改完后重启 `fun-ai-station-api` 生效。
 
@@ -43,7 +43,7 @@
 ```json
 {
   "event_id": "unique-message-id",
-  "agent": "attendance",
+  "agent": "general",
   "text": "用户发来的消息内容",
   "context": {
     "channel": "wecom",
@@ -58,7 +58,7 @@
 
 ```bash
 ts=$(python -c "import time; print(int(time.time()))")
-body='{"event_id":"e1","agent":"attendance","text":"你好"}'
+body='{"event_id":"e1","agent":"general","text":"你好"}'
 sig=$(python - << 'PY'
 import hmac, hashlib, os, sys
 secret = os.environ["OPENCLAW_WEBHOOK_SECRET"].encode("utf-8")

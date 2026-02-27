@@ -64,7 +64,7 @@
 说明：
 - `baseUrl` 末尾不要带 `/chat/completions`，只需要到 `/openai/v1`
 - `api`：这里保持 `openai-completions`（本项目同时兼容 `/completions` 和 `/chat/completions`）
-- 若你希望显式指定 agent，可把 OpenClaw 的模型 id 写成：`agent:<agent_code>`（例如 `agent:attendance`），本项目会识别并路由到对应 agent
+- 若你希望显式指定 agent，可把 OpenClaw 的模型 id 写成：`agent:<agent_code>`（例如 `agent:general`），本项目会识别并路由到对应 agent
 
 改完后重启 OpenClaw Gateway（你当前是 systemd user unit）：
 

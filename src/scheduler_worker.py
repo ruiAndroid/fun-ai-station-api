@@ -86,7 +86,7 @@ def parse_payload(
     default_agent = str(
         (settings.SCHEDULER_DEFAULT_AGENT or "").strip()
         or (settings.OPENCLAW_DEFAULT_AGENT or "").strip()
-        or "attendance"
+        or "general"
     )
     mode = str(
         (settings.SCHEDULER_ROUTER_MODE or "").strip().lower()

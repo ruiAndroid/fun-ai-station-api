@@ -33,7 +33,7 @@ def _normalize_payload(task: LongTask) -> tuple[str, Dict[str, Any], str, str, s
     text = str(raw.get("text") or raw.get("input") or "")
     context = raw.get("context") if isinstance(raw.get("context"), dict) else {}
 
-    default_agent = str(raw.get("default_agent") or "").strip() or settings.OPENCLAW_DEFAULT_AGENT or "attendance"
+    default_agent = str(raw.get("default_agent") or "").strip() or settings.OPENCLAW_DEFAULT_AGENT or "general"
     mode = str(raw.get("mode") or "").strip().lower() or settings.ROUTER_MODE or "hybrid"
 
     forced_agent = str(raw.get("agent") or raw.get("forced_agent") or "").strip()
@@ -264,4 +264,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
