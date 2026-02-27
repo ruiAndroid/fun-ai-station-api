@@ -124,11 +124,19 @@ curl -X POST "$API_BASE/scheduled-tasks" \
 
 ### 4.3 next_run_at 计算规则
 
-- `interval`：`after_utc + max(60, int(schedule_expr))`
+- `interval`：`after_utc + seconds`，其中：
+  - `seconds=int(schedule_expr)`
+  - 若 `seconds <= 0` 则回退为 `60`
+  - 若 `seconds < SCHEDULED_TASK_INTERVAL_MIN_SECONDS` 则抬到该最小值
 - `cron`：用 `croniter` 基于 `timezone` 计算“下一次本地时间”，再转换回 UTC naive
 - `once`：
   - `ok=true`：自动 `enabled=false` 且 `next_run_at=null`
   - `ok=false`：会写入一个“下次重试时间”（当前逻辑同样走 +60s backoff）
+
+### 4.4 安全限制（建议保留）
+
+- `SCHEDULED_TASK_INTERVAL_MIN_SECONDS`：interval 最小秒数（默认 10），低于该值会被 API 拒绝/worker 抬高
+- `SCHEDULED_TASKS_MAX_ENABLED_PER_USER`：每个用户最多同时启用的定时任务数量（默认 20），超过会被 API 拒绝
 
 ---
 

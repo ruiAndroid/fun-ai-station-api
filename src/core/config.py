@@ -100,6 +100,10 @@ class Settings:
     SCHEDULER_DEFAULT_AGENT: str
     SCHEDULER_ROUTER_MODE: str
 
+    # Scheduled tasks limits (safety)
+    SCHEDULED_TASK_INTERVAL_MIN_SECONDS: int
+    SCHEDULED_TASKS_MAX_ENABLED_PER_USER: int
+
     # Long tasks
     LONG_TASK_EXECUTE_TIMEOUT_SECONDS: int
 
@@ -141,6 +145,12 @@ class Settings:
         # Scheduler defaults (keep empty => fall back to OPENCLAW_DEFAULT_AGENT / ROUTER_MODE)
         self.SCHEDULER_DEFAULT_AGENT = (cfg.get("SCHEDULER_DEFAULT_AGENT", "") or "").strip()
         self.SCHEDULER_ROUTER_MODE = (cfg.get("SCHEDULER_ROUTER_MODE", "") or "").strip().lower()
+
+        # Scheduled tasks limits
+        self.SCHEDULED_TASK_INTERVAL_MIN_SECONDS = max(
+            1, _get_int(cfg, "SCHEDULED_TASK_INTERVAL_MIN_SECONDS", 10)
+        )
+        self.SCHEDULED_TASKS_MAX_ENABLED_PER_USER = _get_int(cfg, "SCHEDULED_TASKS_MAX_ENABLED_PER_USER", 20)
 
         # Long tasks
         self.LONG_TASK_EXECUTE_TIMEOUT_SECONDS = _get_int(cfg, "LONG_TASK_EXECUTE_TIMEOUT_SECONDS", 600)

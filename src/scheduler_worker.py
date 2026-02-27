@@ -51,6 +51,9 @@ def compute_next_run(task: ScheduledTask, *, after_utc: datetime) -> Optional[da
             seconds = 0
         if seconds <= 0:
             seconds = 60
+        min_seconds = max(1, int(get_settings().SCHEDULED_TASK_INTERVAL_MIN_SECONDS or 10))
+        if seconds < min_seconds:
+            seconds = min_seconds
         return after_utc + timedelta(seconds=seconds)
 
     # default: cron

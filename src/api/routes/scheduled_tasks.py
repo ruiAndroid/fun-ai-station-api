@@ -5,11 +5,12 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
 from croniter import croniter
-from sqlalchemy import delete, desc, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
 
 from src.api.deps import get_current_user
+from src.core.config import get_settings
 from src.core.db import get_db
 from src.models.scheduled_task import ScheduledTask, ScheduledTaskRun
 from src.models.user import User
@@ -57,6 +58,27 @@ def _to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+def _parse_interval_seconds(expr: str) -> int:
+    try:
+        return int(str(expr or "").strip())
+    except Exception:
+        raise HTTPException(status_code=400, detail="interval schedule_expr must be integer seconds")
+
+
+def _count_enabled_tasks(db: Session, *, user_id: str, exclude_task_id: int | None = None) -> int:
+    q = (
+        select(func.count())
+        .select_from(ScheduledTask)
+        .where(ScheduledTask.user_id == user_id, ScheduledTask.enabled.is_(True))
+    )
+    if exclude_task_id is not None:
+        q = q.where(ScheduledTask.id != exclude_task_id)
+    try:
+        return int(db.execute(q).scalar_one() or 0)
+    except Exception:
+        return 0
+
+
 def _compute_next_run(schedule_type: str, schedule_expr: str, tz_name: str, *, after_utc: datetime):
     st = (schedule_type or "").strip().lower()
     expr = (schedule_expr or "").strip()
@@ -66,12 +88,12 @@ def _compute_next_run(schedule_type: str, schedule_expr: str, tz_name: str, *, a
         return None
 
     if st == "interval":
-        try:
-            seconds = int(expr)
-        except Exception:
-            seconds = 0
+        seconds = _parse_interval_seconds(expr)
         if seconds <= 0:
             seconds = 60
+        min_seconds = max(1, int(get_settings().SCHEDULED_TASK_INTERVAL_MIN_SECONDS or 10))
+        if seconds < min_seconds:
+            seconds = min_seconds
         return after_utc + timedelta(seconds=seconds)
 
     try:
@@ -137,10 +159,32 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    settings = get_settings()
     now = datetime.utcnow()
     schedule_type = (payload.schedule_type or "cron").strip()
     schedule_expr = (payload.schedule_expr or "").strip()
     tz_name = (payload.timezone or "UTC").strip() or "UTC"
+
+    if schedule_type.strip().lower() == "interval":
+        seconds = _parse_interval_seconds(schedule_expr)
+        if seconds <= 0:
+            seconds = 60
+        if seconds < settings.SCHEDULED_TASK_INTERVAL_MIN_SECONDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"interval must be >= {settings.SCHEDULED_TASK_INTERVAL_MIN_SECONDS}s",
+            )
+        schedule_expr = str(seconds)
+
+    max_enabled = int(settings.SCHEDULED_TASKS_MAX_ENABLED_PER_USER or 0)
+    if payload.enabled and max_enabled > 0:
+        enabled_count = _count_enabled_tasks(db, user_id=current_user.id)
+        if enabled_count >= max_enabled:
+            raise HTTPException(
+                status_code=409,
+                detail=f"too many enabled scheduled tasks (max {max_enabled})",
+            )
+
     next_run_at = payload.next_run_at
     if next_run_at is None and schedule_type.strip().lower() != "once":
         next_run_at = _compute_next_run(schedule_type, schedule_expr, tz_name, after_utc=now)
@@ -173,6 +217,7 @@ def update_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    settings = get_settings()
     task = db.get(ScheduledTask, task_id)
     if not task or task.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -180,7 +225,17 @@ def update_task(
     if payload.name is not None:
         task.name = payload.name.strip() or task.name
     if payload.enabled is not None:
-        task.enabled = bool(payload.enabled)
+        new_enabled = bool(payload.enabled)
+        if new_enabled and not bool(task.enabled):
+            max_enabled = int(settings.SCHEDULED_TASKS_MAX_ENABLED_PER_USER or 0)
+            if max_enabled > 0:
+                enabled_count = _count_enabled_tasks(db, user_id=current_user.id, exclude_task_id=int(task.id))
+                if enabled_count >= max_enabled:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"too many enabled scheduled tasks (max {max_enabled})",
+                    )
+        task.enabled = new_enabled
     if payload.schedule_type is not None:
         task.schedule_type = (payload.schedule_type or "").strip() or task.schedule_type
     if payload.schedule_expr is not None:
@@ -191,6 +246,17 @@ def update_task(
         task.payload = _sanitize_payload(payload.payload)
     if payload.next_run_at is not None:
         task.next_run_at = payload.next_run_at
+
+    if (task.schedule_type or "").strip().lower() == "interval":
+        seconds = _parse_interval_seconds(task.schedule_expr)
+        if seconds <= 0:
+            seconds = 60
+        if seconds < settings.SCHEDULED_TASK_INTERVAL_MIN_SECONDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"interval must be >= {settings.SCHEDULED_TASK_INTERVAL_MIN_SECONDS}s",
+            )
+        task.schedule_expr = str(seconds)
 
     # clear lease on edits (avoid confusing stuck locks)
     task.locked_by = None
