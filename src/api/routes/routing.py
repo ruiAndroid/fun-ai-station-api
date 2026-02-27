@@ -10,6 +10,7 @@ from src.core.config import get_settings
 from src.core.db import get_db
 from src.core.orchestrator_client import dispatch_plan_full
 from src.models.agent import Agent
+from typing import Any, Dict, List
 
 
 router = APIRouter(prefix="/routing", tags=["routing"])
@@ -63,7 +64,10 @@ async def route_plan(request: Request, db: Session = Depends(get_db)):
     default_agent = req_default_agent or (settings.OPENCLAW_DEFAULT_AGENT or settings.OPENAI_DEFAULT_AGENT or "attendance")
 
     user_id = _try_get_user_id(request)
-    context: Dict[str, Any] = {"user_id": user_id} if user_id else {}
+    payload_context = payload.get("context")
+    context: Dict[str, Any] = payload_context if isinstance(payload_context, dict) else {}
+    if user_id and not context.get("user_id"):
+        context["user_id"] = user_id
 
     # Prefer orchestrator service (lives in fun-agent-service for now).
     plan0 = await dispatch_plan_full(
