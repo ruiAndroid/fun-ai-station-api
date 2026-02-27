@@ -13,6 +13,7 @@ async def dispatch_plan(
     default_agent: str,
     mode: str,
     trace_id: str = "",
+    context: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Call orchestrator to build a sequential dispatch plan:
@@ -23,6 +24,7 @@ async def dispatch_plan(
         default_agent=default_agent,
         mode=mode,
         trace_id=trace_id,
+        context=context,
     )
     items = data.get("items") if isinstance(data, dict) else None
     return items if isinstance(items, list) else []
@@ -34,6 +36,7 @@ async def dispatch_plan_full(
     default_agent: str,
     mode: str,
     trace_id: str = "",
+    context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Call orchestrator to build a sequential dispatch plan (full response).
@@ -50,6 +53,7 @@ async def dispatch_plan_full(
         "text": text,
         "default_agent": default_agent,
         "mode": mode,
+        "context": context or {},
     }
     try:
         async with httpx.AsyncClient(timeout=8) as client:

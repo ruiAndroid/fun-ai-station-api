@@ -2,6 +2,7 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from src.core.agent_routing import AgentLike, build_dispatch_plan_auto
@@ -12,6 +13,28 @@ from src.models.agent import Agent
 
 
 router = APIRouter(prefix="/routing", tags=["routing"])
+
+
+def _try_get_user_id(request: Request) -> str:
+    """
+    Best-effort extract user_id from Authorization: Bearer <jwt>.
+    Keep routing endpoint backward compatible: no auth requirement here.
+    """
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    auth = auth.strip()
+    if not auth.lower().startswith("bearer "):
+        return ""
+    token = auth.split(" ", 1)[1].strip()
+    if not token:
+        return ""
+
+    settings = get_settings()
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        sub = payload.get("sub")
+        return str(sub or "").strip()
+    except JWTError:
+        return ""
 
 
 @router.post("/plan")
@@ -39,12 +62,16 @@ async def route_plan(request: Request, db: Session = Depends(get_db)):
     req_default_agent = req_default_agent.strip()
     default_agent = req_default_agent or (settings.OPENCLAW_DEFAULT_AGENT or settings.OPENAI_DEFAULT_AGENT or "attendance")
 
+    user_id = _try_get_user_id(request)
+    context: Dict[str, Any] = {"user_id": user_id} if user_id else {}
+
     # Prefer orchestrator service (lives in fun-agent-service for now).
     plan0 = await dispatch_plan_full(
         text=text,
         default_agent=default_agent,
         mode=getattr(settings, "ROUTER_MODE", "hybrid"),
         trace_id=trace_id,
+        context=context,
     )
     items0 = plan0.get("items") if isinstance(plan0, dict) else None
     if isinstance(items0, list) and items0:

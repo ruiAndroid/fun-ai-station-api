@@ -3,6 +3,7 @@ from typing import Any, Dict
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+from jose import JWTError, jwt
 
 from src.core.config import get_settings
 
@@ -12,6 +13,41 @@ router = APIRouter(prefix="/agent-service", tags=["agent-service"])
 def _service_base() -> str:
     settings = get_settings()
     return settings.FUN_AGENT_SERVICE_URL.rstrip("/")
+
+
+def _try_get_user_id(request: Request) -> str:
+    """
+    Best-effort extract user_id from Authorization: Bearer <jwt>.
+    Keep agent-service proxy backward compatible: no auth requirement here.
+    """
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    auth = auth.strip()
+    if not auth.lower().startswith("bearer "):
+        return ""
+    token = auth.split(" ", 1)[1].strip()
+    if not token:
+        return ""
+
+    settings = get_settings()
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        sub = payload.get("sub")
+        return str(sub or "").strip()
+    except JWTError:
+        return ""
+
+
+def _inject_user_id(payload: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    if not user_id:
+        return payload
+    ctx = payload.get("context")
+    if not isinstance(ctx, dict):
+        ctx = {}
+    # Do not override if caller already sets it.
+    if not ctx.get("user_id"):
+        ctx["user_id"] = user_id
+    payload["context"] = ctx
+    return payload
 
 
 @router.get("/agents")
@@ -38,6 +74,8 @@ async def execute_agent(agent: str, request: Request):
         payload: Dict[str, Any] = await request.json()
     except Exception:
         payload = {}
+
+    payload = _inject_user_id(payload, _try_get_user_id(request))
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
